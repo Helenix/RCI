@@ -10,11 +10,11 @@
 #include <stdbool.h>
 
 int main (int argc, char * argv[]) {
-    int i, centralServerLength, serviceID;
+    int i, centralServerLength, serviceX, serviceServerID, bytesReceived;
     int centralServerSocket;
-    unsigned centralServerPort = 59000, udpPort, tcpPort;
+    unsigned centralServerPort = 59000, serviceUdpPort, serviceTcpPort;
     char *centralServerIP = NULL, *serviceServerIP = NULL;
-    char message[128], buffer[128];
+    char message[128], reply[128], buffer[128];
     struct sockaddr_in centralServer;
     struct hostent *host;
     bool isDefaultServer = true;
@@ -27,14 +27,14 @@ int main (int argc, char * argv[]) {
     // Arguments stuff
     for(i = 1; i < argc; i = i+2) {
         if(!strcmp("-n", argv[i]) && i+1 < argc) {
-            serviceID = atoi(argv[i+1]);
+            serviceServerID = atoi(argv[i+1]);
         } else if(!strcmp("-j", argv[i]) && i+1 < argc) {
             serviceServerIP = (char*) malloc(sizeof(argv[i+1]+1));
             strcpy(serviceServerIP,argv[i+1]);
         } else if(!strcmp("-u", argv[i]) && i+1 < argc) {
-            udpPort = atoi(argv[i+1]);
+            serviceUdpPort = atoi(argv[i+1]);
         } else if(!strcmp("-t", argv[i]) && i+1 < argc) {
-            tcpPort = atoi(argv[i+1]);
+            serviceTcpPort = atoi(argv[i+1]);
         } else if(!strcmp("-i", argv[i]) && i+1 < argc) {
             centralServerIP = (char*) malloc(sizeof(argv[i+1]+1));
             strcpy(centralServerIP,argv[i+1]);
@@ -48,12 +48,12 @@ int main (int argc, char * argv[]) {
         }
     }
 
-    // UDP client for central server requests
     centralServerSocket = socket(AF_INET, SOCK_DGRAM, 0);
     if(centralServerSocket == -1) {
         exit(-1);
     }
 
+    // UDP client for central server requests
     memset((void*)&centralServer,(int)'\0', sizeof(centralServer));
     centralServer.sin_family = AF_INET;
     if(isDefaultServer || centralServerIP == NULL) { 
@@ -77,21 +77,28 @@ int main (int argc, char * argv[]) {
     printf("Central Server IP  : %s \n", inet_ntoa(centralServer.sin_addr));
     printf("Central Server port: %d \n", ntohs(centralServer.sin_port));
     printf("Service IP  : %s \n", serviceServerIP);
-    printf("Service ID  : %d \n", serviceID);   
-    printf("Service udp port: %d \n", udpPort);
-    printf("Service tcp port: %d \n", tcpPort);
+    printf("Service ID  : %d \n", serviceServerID);   
+    printf("Service udp port: %d \n", serviceUdpPort);
+    printf("Service tcp port: %d \n", serviceTcpPort);
     printf("\nType 'help' for valid commands\n");
 
     while(1) {
         fgets(buffer, sizeof(buffer), stdin);
         sscanf(buffer,"%[^\n]s", message);
 
-        if(!strcmp("join x",message)) {
+        if(sscanf(message, "join %d", &serviceX) == 1) {
+            sprintf(message,"GET_START %d;%d", serviceX, serviceServerID);
+            printf("\tCentral Server request: %s\n", message);
+            sendto(centralServerSocket, message,strlen(message)+1, 0, (struct sockaddr*)&centralServer, sizeof(centralServer));
+            centralServerLength = sizeof(centralServer);
+            bytesReceived = recvfrom(centralServerSocket, reply, sizeof(reply), 0, (struct sockaddr*)&centralServer, &centralServerLength);
+            reply[bytesReceived] = '\0';
+            printf("\tCentral Server reply: %s\n", reply);            
 
         } else if(!strcmp("show_state",message)) {
 
         } else if(!strcmp("leave",message)) {
-            
+  
         } else if(!strcmp("exit",message)) {
             break;
         } else if(!strcmp("help",message)) {
@@ -114,3 +121,12 @@ int main (int argc, char * argv[]) {
 
     return 0; 
 }
+
+/* printf("\tNo DS Server for service %d, registing server with IP %s\n", serviceX, serviceServerIP);
+sprintf(message,"SET_START %d;%d;%s;%d", serviceX, serviceServerID, serviceServerIP, serviceTcpPort);
+printf("\tCentral Server request: %s\n", message);
+sendto(centralServerSocket, message,strlen(message)+1, 0, (struct sockaddr*)&centralServer, sizeof(centralServer));
+centralServerLength = sizeof(centralServer);
+bytesReceived = recvfrom(centralServerSocket, reply, sizeof(reply), 0, (struct sockaddr*)&centralServer, &centralServerLength);
+reply[bytesReceived] = '\0';
+printf("\tCentral Server reply: %s\n", reply); */
