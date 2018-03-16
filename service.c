@@ -9,14 +9,19 @@
 #include <arpa/inet.h> 
 #include <stdbool.h>
 
+#define BUFFER_SIZE 128
+#define DEFAULT_PORT 59000
+
+void communicate(int socket, struct sockaddr_in addr, char *message, char *reply);
+
 int main (int argc, char * argv[]) {
     int i, centralServerLength, serviceX, serviceServerID, bytesReceived;
     int centralServerSocket;
-    unsigned centralServerPort = 59000, serviceUdpPort, serviceTcpPort;
+    unsigned centralServerPort = DEFAULT_PORT, serviceUdpPort, serviceTcpPort;
     char *centralServerIP = NULL, *serviceServerIP = NULL;
-    char message[128], reply[128], buffer[128];
+    char message[BUFFER_SIZE], reply[BUFFER_SIZE], buffer[BUFFER_SIZE];
     struct sockaddr_in centralServer;
-    struct hostent *host;
+    struct hostent *host = NULL;
     bool isDefaultServer = true;
     
     if(argc < 9 || argc > 13) {
@@ -69,17 +74,16 @@ int main (int argc, char * argv[]) {
 
     // Central server and service information
     if(isDefaultServer) {
-        printf("Default central Server\n");
+        printf("-> Default central Server\n");
+    } else {
+        printf("-> Custom central Server\n");
     }
-    else {
-        printf("Custom central Server\n");
-    }
-    printf("Central Server IP  : %s \n", inet_ntoa(centralServer.sin_addr));
-    printf("Central Server port: %d \n", ntohs(centralServer.sin_port));
-    printf("Service IP  : %s \n", serviceServerIP);
-    printf("Service ID  : %d \n", serviceServerID);   
-    printf("Service udp port: %d \n", serviceUdpPort);
-    printf("Service tcp port: %d \n", serviceTcpPort);
+    printf("Central Server IP   : %s \n", inet_ntoa(centralServer.sin_addr));
+    printf("Central Server port : %d \n", ntohs(centralServer.sin_port));
+    printf("Service IP          : %s \n", serviceServerIP);
+    printf("Service ID          : %d \n", serviceServerID);   
+    printf("Service udp port    : %d \n", serviceUdpPort);
+    printf("Service tcp port    : %d \n", serviceTcpPort);
     printf("\nType 'help' for valid commands\n");
 
     while(1) {
@@ -88,17 +92,18 @@ int main (int argc, char * argv[]) {
 
         if(sscanf(message, "join %d", &serviceX) == 1) {
             sprintf(message,"GET_START %d;%d", serviceX, serviceServerID);
-            printf("\tCentral Server request: %s\n", message);
-            sendto(centralServerSocket, message,strlen(message)+1, 0, (struct sockaddr*)&centralServer, sizeof(centralServer));
-            centralServerLength = sizeof(centralServer);
-            bytesReceived = recvfrom(centralServerSocket, reply, sizeof(reply), 0, (struct sockaddr*)&centralServer, &centralServerLength);
-            reply[bytesReceived] = '\0';
-            printf("\tCentral Server reply: %s\n", reply);            
-
-        } else if(!strcmp("show_state",message)) {
-
+            communicate(centralServerSocket, centralServer, message, reply);
+            OK ID;0;0.0.0.0;0;
+            if(!strcmp("0;0;0.0.0.0;0",reply)) {
+                printf("Server cannot handle requests\n");
+            } else if()
+        } 
+        else if(!strcmp("show_state",message)) {
+            
         } else if(!strcmp("leave",message)) {
-  
+            sprintf(message,"GET_START %d;%d", serviceX, serviceServerID);
+            communicate(centralServerSocket, centralServer, message, reply);
+
         } else if(!strcmp("exit",message)) {
             break;
         } else if(!strcmp("help",message)) {
@@ -122,11 +127,13 @@ int main (int argc, char * argv[]) {
     return 0; 
 }
 
-/* printf("\tNo DS Server for service %d, registing server with IP %s\n", serviceX, serviceServerIP);
-sprintf(message,"SET_START %d;%d;%s;%d", serviceX, serviceServerID, serviceServerIP, serviceTcpPort);
-printf("\tCentral Server request: %s\n", message);
-sendto(centralServerSocket, message,strlen(message)+1, 0, (struct sockaddr*)&centralServer, sizeof(centralServer));
-centralServerLength = sizeof(centralServer);
-bytesReceived = recvfrom(centralServerSocket, reply, sizeof(reply), 0, (struct sockaddr*)&centralServer, &centralServerLength);
-reply[bytesReceived] = '\0';
-printf("\tCentral Server reply: %s\n", reply); */
+void communicate(int socket, struct sockaddr_in addr, char *message, char *reply) {
+    int bytesReceived;
+    int length = sizeof(addr);
+    printf("\tServer request: %s\n", message);
+    sendto(socket, message,strlen(message), 0, (struct sockaddr*)&addr, length);
+    bytesReceived = recvfrom(socket, reply, BUFFER_SIZE, 0, (struct sockaddr*)&addr, &length);   
+    reply[bytesReceived] = '\0';
+    printf("\tServer reply: %s\n", reply);      
+    return;
+}
