@@ -12,12 +12,14 @@
 #define BUFFER_SIZE 128
 #define DEFAULT_PORT 59000
 
-void communicate(int socket, struct sockaddr_in addr, char *message, char *reply);
+void communicateUDP(int socket, struct sockaddr_in addr, char *message, char *reply);
+int checkServerReply(char *reply);
 
 int main (int argc, char * argv[]) {
-    int i, centralServerLength, serviceX, serviceServerID, bytesReceived;
+    int i, serviceX, serviceServerID, bytesReceived;
     int centralServerSocket;
-    unsigned centralServerPort = DEFAULT_PORT, serviceUdpPort, serviceTcpPort;
+    int replyID1;
+    unsigned centralServerPort = DEFAULT_PORT, serviceUdpPort, serviceTcpPort, centralServerLength;
     char *centralServerIP = NULL, *serviceServerIP = NULL;
     char message[BUFFER_SIZE], reply[BUFFER_SIZE], buffer[BUFFER_SIZE];
     struct sockaddr_in centralServer;
@@ -33,21 +35,27 @@ int main (int argc, char * argv[]) {
     for(i = 1; i < argc; i = i+2) {
         if(!strcmp("-n", argv[i]) && i+1 < argc) {
             serviceServerID = atoi(argv[i+1]);
-        } else if(!strcmp("-j", argv[i]) && i+1 < argc) {
+        } 
+        else if(!strcmp("-j", argv[i]) && i+1 < argc) {
             serviceServerIP = (char*) malloc(sizeof(argv[i+1]+1));
             strcpy(serviceServerIP,argv[i+1]);
-        } else if(!strcmp("-u", argv[i]) && i+1 < argc) {
+        } 
+        else if(!strcmp("-u", argv[i]) && i+1 < argc) {
             serviceUdpPort = atoi(argv[i+1]);
-        } else if(!strcmp("-t", argv[i]) && i+1 < argc) {
+        } 
+        else if(!strcmp("-t", argv[i]) && i+1 < argc) {
             serviceTcpPort = atoi(argv[i+1]);
-        } else if(!strcmp("-i", argv[i]) && i+1 < argc) {
+        } 
+        else if(!strcmp("-i", argv[i]) && i+1 < argc) {
             centralServerIP = (char*) malloc(sizeof(argv[i+1]+1));
             strcpy(centralServerIP,argv[i+1]);
             isDefaultServer = false;
-        } else if(!strcmp("-p", argv[i]) && i+1 < argc) {
+        } 
+        else if(!strcmp("-p", argv[i]) && i+1 < argc) {
             centralServerPort = atoi(argv[i+1]);
             isDefaultServer = false;
-        } else {
+        } 
+        else {
             printf("Invalid type of arguments\n");
             exit(-1);
         }
@@ -66,7 +74,8 @@ int main (int argc, char * argv[]) {
             exit(-1);
         }
 		centralServer.sin_addr.s_addr = ((struct in_addr *)(host->h_addr_list[0]))->s_addr;
-    } else {
+    } 
+    else {
         inet_aton(centralServerIP, &centralServer.sin_addr);
     }
     centralServer.sin_port = htons((u_short)centralServerPort);
@@ -75,7 +84,8 @@ int main (int argc, char * argv[]) {
     // Central server and service information
     if(isDefaultServer) {
         printf("-> Default central Server\n");
-    } else {
+    } 
+    else {
         printf("-> Custom central Server\n");
     }
     printf("Central Server IP   : %s \n", inet_ntoa(centralServer.sin_addr));
@@ -92,27 +102,47 @@ int main (int argc, char * argv[]) {
 
         if(sscanf(message, "join %d", &serviceX) == 1) {
             sprintf(message,"GET_START %d;%d", serviceX, serviceServerID);
-            communicate(centralServerSocket, centralServer, message, reply);
-            OK ID;0;0.0.0.0;0;
-            if(!strcmp("0;0;0.0.0.0;0",reply)) {
-                printf("Server cannot handle requests\n");
-            } else if()
+            communicateUDP(centralServerSocket, centralServer, message, reply);
+            
+            switch (checkServerReply(reply)) {
+                case 0:
+                    printf("Server cannot handle this request\n");
+                    break;
+
+                case 1:
+                    printf("\tNew Start Server\n");
+                    communicateUDP(centralServerSocket, centralServer, message, reply);                
+                    sprintf(message,"SET_START %d;%d;%s;%d", serviceX, serviceServerID, serviceServerIP, serviceUdpPort);
+                    communicateUDP(centralServerSocket, centralServer, message, reply);
+                    sprintf(message,"SET_DS %d;%d;%s;%d", serviceX, serviceServerID, serviceServerIP, serviceUdpPort);
+                    communicateUDP(centralServerSocket, centralServer, message, reply);
+                    break;
+
+                case 2:
+                    printf("There is a start Server\n");
+                    break;
+                
+                default:
+                    break;
+            }
         } 
         else if(!strcmp("show_state",message)) {
-            
-        } else if(!strcmp("leave",message)) {
-            sprintf(message,"GET_START %d;%d", serviceX, serviceServerID);
-            communicate(centralServerSocket, centralServer, message, reply);
 
-        } else if(!strcmp("exit",message)) {
+        }
+        else if(!strcmp("leave",message)) {
+        
+        }
+        else if(!strcmp("exit",message)) {
             break;
-        } else if(!strcmp("help",message)) {
+        } 
+        else if(!strcmp("help",message)) {
           printf("Valid commands: \n");
           printf("-> join x \n");
           printf("-> show_state \n");
           printf("-> leave \n");
           printf("-> exit \n");  
-        } else {
+        } 
+        else {
             printf("Invalid command! Type 'help'\n");
         }
     }
@@ -127,13 +157,30 @@ int main (int argc, char * argv[]) {
     return 0; 
 }
 
-void communicate(int socket, struct sockaddr_in addr, char *message, char *reply) {
+void communicateUDP(int socket, struct sockaddr_in addr, char *message, char *reply) {
     int bytesReceived;
     int length = sizeof(addr);
     printf("\tServer request: %s\n", message);
-    sendto(socket, message,strlen(message), 0, (struct sockaddr*)&addr, length);
+    sendto(socket, message, strlen(message)+1, 0, (struct sockaddr*)&addr, length);
     bytesReceived = recvfrom(socket, reply, BUFFER_SIZE, 0, (struct sockaddr*)&addr, &length);   
     reply[bytesReceived] = '\0';
     printf("\tServer reply: %s\n", reply);      
     return;
+}
+
+int checkServerReply(char *reply) {
+    int id1, id2;
+    char ip[20];
+    unsigned port;
+
+    sscanf(reply, "OK %d;%d;%[^;];%d", &id1, &id2, ip, &port);
+    if(id1 <= 0) {
+        return 0;
+    } 
+    else if(id1 != 0 && id2 == 0 && (!strcmp(ip, "0.0.0.0")) && port == 0) {
+        return 1;
+    } 
+    else {
+        return 2;
+    }
 }
