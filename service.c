@@ -18,21 +18,17 @@ int checkServerReply(char *reply, int *id1, int *id2, char *ip, unsigned *port);
 
 int main (int argc, char * argv[]) {
     int i, serviceX, serviceServerID, bytesReceived;
-    int centralServerSocket, UDPServerSocket;
-    int replyID1;
+    int centralServerSocket, UDPServerSocket, TCPServerSocket, TCPClientSocket;
+    int replyID1, replyID2;
     int length;
-    unsigned centralServerPort = DEFAULT_PORT, serviceUdpPort, serviceTcpPort, centralServerLength;
+    unsigned centralServerPort = DEFAULT_PORT, serviceUdpPort, serviceTcpPort, centralServerLength, replyPort;
     char *centralServerIP = NULL, *serviceServerIP = NULL;
-    char message[BUFFER_SIZE], reply[BUFFER_SIZE], buffer[BUFFER_SIZE];
-    struct sockaddr_in centralServer, UDPServer;
+    char message[BUFFER_SIZE], reply[BUFFER_SIZE], buffer[BUFFER_SIZE], replyIP[BUFFER_SIZE];
+    struct sockaddr_in centralServer, UDPServer, TCPServer, TCPClient;
     struct hostent *host = NULL;
     bool isDefaultServer = true, isStartServer = false, isDSServer = false;
     fd_set rfds;
     int maxfd, counter;
-
-    int id1, id2;
-    char ip[20];
-    unsigned port;
     
     if(argc < 9 || argc > 13) {
         printf("Invalid number of arguments\n");
@@ -77,6 +73,14 @@ int main (int argc, char * argv[]) {
     if(UDPServerSocket == -1) {
         exit(-1);
     }
+    TCPServerSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if(TCPServerSocket == -1) {
+        exit(-1);
+    }
+    TCPClientSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if(TCPClientSocket == -1) {
+        exit(-1);
+    }
 
     // UDP client for central server requests
     memset((void*)&centralServer,(int)'\0', sizeof(centralServer));
@@ -102,6 +106,20 @@ int main (int argc, char * argv[]) {
     if(bind(UDPServerSocket, (struct sockaddr *)&UDPServer, sizeof(UDPServer)) == -1) {
         exit(-1);
     }
+
+    // TCP Server
+    memset((void*)&TCPServer,(int)'\0', sizeof(TCPServer));
+    TCPServer.sin_family = AF_INET;
+    TCPServer.sin_addr.s_addr = htonl(INADDR_ANY);
+    TCPServer.sin_port = htons((u_short)serviceTcpPort);
+
+    if(bind(TCPServerSocket, (struct sockaddr *)&TCPServer, sizeof(TCPServer)) == -1) {
+        exit(-1);
+    }
+
+    if(listen(TCPServerSocket, 5) == -1) {
+        exit(-1);
+                        } 
 
     // Central server and service information
     if(isDefaultServer) {
@@ -138,14 +156,14 @@ int main (int argc, char * argv[]) {
                 sprintf(message,"GET_START %d;%d", serviceX, serviceServerID);
                 communicateUDP(centralServerSocket, centralServer, message, reply);
                 
-                switch (checkServerReply(reply, &id1, &id2, ip, &port)) {
+                switch (checkServerReply(reply, &replyID1, &replyID2, replyIP, &replyPort)) {
                     case 0:
                         printf("Server cannot handle this request\n");
                         break;
 
                     case 1:
                         printf("\tNew Start Server\n");             
-                        sprintf(message,"SET_START %d;%d;%s;%d", serviceX, serviceServerID, serviceServerIP, serviceUdpPort);
+                        sprintf(message,"SET_START %d;%d;%s;%d", serviceX, serviceServerID, serviceServerIP, serviceTcpPort);
                         communicateUDP(centralServerSocket, centralServer, message, reply);
                         sprintf(message,"SET_DS %d;%d;%s;%d", serviceX, serviceServerID, serviceServerIP, serviceUdpPort);
                         communicateUDP(centralServerSocket, centralServer, message, reply);
@@ -155,6 +173,23 @@ int main (int argc, char * argv[]) {
 
                     case 2:
                         printf("\tThere is a start Server\n");
+                        if(serviceServerID == replyID2) {
+                            printf("\tID: %d already has one service\n", serviceServerID);
+                        }
+
+                        // TCP Client
+                        memset((void*)&TCPClient,(int)'\0', sizeof(TCPClient));
+                        TCPClient.sin_family = AF_INET;
+                        inet_aton(replyIP, &TCPClient.sin_addr);
+                        TCPClient.sin_port = htons((u_short)replyPort);
+
+                        if(connect(TCPClientSocket, (struct sockaddr *)&TCPClient, sizeof(TCPClient)) == -1) {
+                            exit(-1);
+                        } 
+                        sprintf(message,"NEW %d;%s;%d\n", serviceServerID, serviceServerIP, serviceTcpPort);
+                        printf("\t%s", message);
+                       // write();
+                        
                         break;
                     
                     default:
@@ -165,9 +200,30 @@ int main (int argc, char * argv[]) {
 
             }
             else if(!strcmp("leave", message)) {
-            
+                if(isDSServer) {
+                    sprintf(message,"WITHDRAW_DS %d;%d", serviceX, serviceServerID);
+                    communicateUDP(centralServerSocket, centralServer, message, reply);
+                    isDSServer = false;
+                }                
+
+                if(isStartServer) {
+                    sprintf(message,"WITHDRAW_START %d;%d", serviceX, serviceServerID);
+                    communicateUDP(centralServerSocket, centralServer, message, reply);
+                    isStartServer = false;
+                }
             }
             else if(!strcmp("exit", message)) {
+                if(isDSServer) {
+                    sprintf(message,"WITHDRAW_DS %d;%d", serviceX, serviceServerID);
+                    communicateUDP(centralServerSocket, centralServer, message, reply);
+                    isDSServer = false;
+                }                
+
+                if(isStartServer) {
+                    sprintf(message,"WITHDRAW_START %d;%d", serviceX, serviceServerID);
+                    communicateUDP(centralServerSocket, centralServer, message, reply);
+                    isStartServer = false;
+                }
                 break;
             } 
             else if(!strcmp("help", message)) {
@@ -188,29 +244,26 @@ int main (int argc, char * argv[]) {
             reply[bytesReceived] = '\0';
             printf("\t%s\n", reply);
 
-            if(strstr(reply, "ON") != NULL) {
+            if(!strcmp("MY SERVICE ON", reply)) {
                 sprintf(buffer, "YOUR SERVICE ON");
-                
-                if(isDSServer) {                
+                if(isDSServer) {
                     sprintf(message,"WITHDRAW_DS %d;%d", serviceX, serviceServerID);
                     communicateUDP(centralServerSocket, centralServer, message, reply);
                     isDSServer = false;
-                }
+                }                
+
                 if(isStartServer) {
                     sprintf(message,"WITHDRAW_START %d;%d", serviceX, serviceServerID);
                     communicateUDP(centralServerSocket, centralServer, message, reply);
                     isStartServer = false;
                 }
             } 
-            else if(strstr(reply, "OFF") != NULL) {
+            else if(!strcmp("MY SERVICE OFF", reply)) {
                 sprintf(buffer, "YOUR SERVICE OFF");
             }
-
             printf("\t%s\n", buffer);
-
             sendto(UDPServerSocket, buffer, strlen(buffer)+1, 0, (struct sockaddr*)&UDPServer, sizeof(UDPServer));
         }
-
     }
 
     if(centralServerIP != NULL) {
@@ -220,30 +273,33 @@ int main (int argc, char * argv[]) {
         free(serviceServerIP);
     }
 
+    close(centralServerSocket);
+    close(UDPServerSocket);
+    close(TCPServerSocket);
+    close(TCPClientSocket);
+
     return 0; 
 }
 
 void communicateUDP(int socket, struct sockaddr_in addr, char *message, char *reply) {
-    int bytesReceived;
-    int bytesSent;
+    int bytes;
     int length = sizeof(addr);
     
-    printf("\tServer request: %s\n", message);
-    bytesSent = sendto(socket, message, strlen(message)+1, 0, (struct sockaddr*)&addr, length);
-    if(bytesSent == -1) {
+    printf("\tRequest: %s\n", message);
+    bytes = sendto(socket, message, strlen(message)+1, 0, (struct sockaddr*)&addr, length);
+    if(bytes == -1) {
         exit(-1);
     }
-    bytesReceived = recvfrom(socket, reply, BUFFER_SIZE, 0, (struct sockaddr*)&addr, &length);   
-    if(bytesReceived == -1) {
+    bytes = recvfrom(socket, reply, BUFFER_SIZE, 0, (struct sockaddr*)&addr, &length);   
+    if(bytes == -1) {
         exit(-1);
     }
-    reply[bytesReceived] = '\0';
-    printf("\tServer reply: %s\n", reply);      
+    reply[bytes] = '\0';
+    printf("\tReply: %s\n", reply);      
     return;
 }
 
 int checkServerReply(char *reply, int *id1, int *id2, char *ip, unsigned *port) {
-
     sscanf(reply, "OK %d;%d;%[^;];%d", id1, id2, ip, port);
     if(*id1 <= 0) {
         return 0;
