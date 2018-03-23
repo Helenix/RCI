@@ -14,7 +14,7 @@
 #define BUFFER_SIZE 128
 #define DEFAULT_PORT 59000
 
-int communicateUDP(int socket, struct sockaddr_in addr, char *message, char *reply);
+int communicateUDP(int fd, struct sockaddr_in addr, char *message, char *reply);
 int checkServerReply(char *reply, int *id, char *ip, unsigned *port);
 
 int main (int argc, char * argv[]) {
@@ -32,7 +32,6 @@ int main (int argc, char * argv[]) {
     struct hostent *host = NULL;
     bool isDefaultServer = true;
     enum {busy, idle} state;
-    struct timeval tv;
 
     
     if(argc < 1 || argc > 5) {
@@ -97,8 +96,6 @@ int main (int argc, char * argv[]) {
 
 
     state = idle;
-
-    tv.tv_sec = 5;
 
     while(1) {
         FD_ZERO(&rfds);
@@ -201,22 +198,37 @@ int main (int argc, char * argv[]) {
     return 0; 
 }
 
-int communicateUDP(int socket, struct sockaddr_in addr, char *message, char *reply) {
-    int bytes;
+int communicateUDP(int fd, struct sockaddr_in addr, char *message, char *reply) {
+    int bytes, counter;
+    fd_set rfds;
+    struct timeval tv;
     unsigned length = sizeof(addr);
     printf("\tServer request: %s\n", message);
-    bytes = sendto(socket, message,strlen(message), 0, (struct sockaddr*)&addr, length);
+    bytes = sendto(fd, message,strlen(message), 0, (struct sockaddr*)&addr, length);
     if (bytes == -1){
         exit(-1);
     }
+
+    tv.tv_sec = 5;
+    tv.tv_usec = 0;
     
-    bytes = recvfrom(socket, reply, BUFFER_SIZE, 0, (struct sockaddr*)&addr, &length);   
+
+    FD_ZERO(&rfds);
+    FD_SET(fd, &rfds);
+
+    counter=select(fd+1,&rfds, (fd_set*)NULL,(fd_set*)NULL, &tv);
+    if(counter < 0) {exit(1);}//error
+    else if (counter == 0){printf("\ttimeout\n"); FD_CLR(fd, &rfds);exit(1);}//timeout
+
+    
+    bytes = recvfrom(fd, reply, BUFFER_SIZE, 0, (struct sockaddr*)&addr, &length);   
     if (bytes == -1){
         exit(-1);
     }
     reply[bytes] = '\0';
-    printf("\tServer reply: %s\n", reply);      
+    printf("\tServer reply: %s\n", reply);    
     return 1;
+
 }
 
 int checkServerReply(char *reply, int *id, char *ip, unsigned *port) {
