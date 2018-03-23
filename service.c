@@ -13,7 +13,7 @@
 #define DEFAULT_PORT 59000
 #define max(A,B) ((A)>=(B)?(A):(B))
 
-void communicateUDP(int socket, struct sockaddr_in addr, char *message, char *reply);
+void communicateUDP(int fd, struct sockaddr_in addr, char *message, char *reply);
 int checkServerReply(char *reply, int *id1, int *id2, char *ip, unsigned *port);
 void writeTCP(int socket, char *message);
 int readTCP(int socket, char *message);
@@ -25,7 +25,7 @@ int main (int argc, char * argv[]) {
     int successorID = 0;
     unsigned length, TCPServerLength, centralServerLength;
     unsigned centralServerPort = DEFAULT_PORT, serviceUdpPort, serviceTcpPort, replyPort;
-    char *centralServerIP = NULL, *serviceServerIP = NULL;
+    char centralServerIP[20], serviceServerIP[20];
     char message[BUFFER_SIZE], reply[BUFFER_SIZE], buffer[BUFFER_SIZE], replyIP[BUFFER_SIZE];
     char *ptr, buffer_write[BUFFER_SIZE], buffer_read[BUFFER_SIZE];
     struct sockaddr_in centralServer, UDPServer, TCPServer, TCPClient;
@@ -46,8 +46,7 @@ int main (int argc, char * argv[]) {
             serviceServerID = atoi(argv[i+1]);
         } 
         else if(!strcmp("-j", argv[i]) && i+1 < argc) {
-            serviceServerIP = (char*) malloc(sizeof(argv[i+1]+1));
-            strcpy(serviceServerIP,argv[i+1]);
+            sprintf(serviceServerIP, "%s", argv[i+1]);
         } 
         else if(!strcmp("-u", argv[i]) && i+1 < argc) {
             serviceUdpPort = atoi(argv[i+1]);
@@ -56,8 +55,7 @@ int main (int argc, char * argv[]) {
             serviceTcpPort = atoi(argv[i+1]);
         } 
         else if(!strcmp("-i", argv[i]) && i+1 < argc) {
-            centralServerIP = (char*) malloc(sizeof(argv[i+1]+1));
-            strcpy(centralServerIP,argv[i+1]);
+            sprintf(centralServerIP, "%s", argv[i+1]);
             isDefaultServer = false;
         } 
         else if(!strcmp("-p", argv[i]) && i+1 < argc) {
@@ -318,7 +316,7 @@ int main (int argc, char * argv[]) {
                 }
         }
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-        else if(FD_ISSET(afd, &rfds)) {
+        else if(stateServer == busy && FD_ISSET(afd, &rfds)) {
             memset(buffer_read, 0, BUFFER_SIZE);
             if((bytes = read(afd, buffer_read, BUFFER_SIZE)) != 0) {
                 if(bytes == -1) {
@@ -326,7 +324,7 @@ int main (int argc, char * argv[]) {
                 }
                 printf("\t%s", buffer_read);
                 
-                /* if(sscanf(buffer_read, "NEW %d;%[^;];%d\n", &replyID1, replyIP, &replyPort) == 3) {
+                if(sscanf(buffer_read, "NEW %d;%[^;];%d\n", &replyID1, replyIP, &replyPort) == 3) {
                     TCPClientSocket = socket(AF_INET, SOCK_STREAM, 0);
                     if(TCPClientSocket == -1) {
                         exit(-1);
@@ -341,15 +339,10 @@ int main (int argc, char * argv[]) {
                         printf("\tCould not connect\n");
                         exit(-1);    
                     } 
-                    memset(buffer_write, 0, BUFFER_SIZE);
-                    sprintf(buffer_write, "Server with ID %d connected to you\n", serviceServerID);
-                    printf("\t%s", buffer_write);
-                    writeTCP(TCPClientSocket, buffer_write); 
-                    
+  
                     stateClient = busy;
                     successorID = replyID1;
-                } */
-
+                }
             }
             else { 
                 printf("\tSocket closed at client end!\n");
@@ -357,7 +350,8 @@ int main (int argc, char * argv[]) {
                 stateServer=idle;
             }  
         }
-        else if(FD_ISSET(TCPClientSocket, &rfds)) {
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////    
+        else if(stateClient == busy && FD_ISSET(TCPClientSocket, &rfds)) {
             memset(buffer_read, 0, BUFFER_SIZE);
             if((bytes = read(TCPClientSocket, buffer_read, BUFFER_SIZE)) != 0) {
                 if(bytes == -1) {
@@ -373,13 +367,6 @@ int main (int argc, char * argv[]) {
         }
     }
 
-    if(centralServerIP != NULL) {
-        free(centralServerIP);
-    }
-    if(serviceServerIP != NULL) {
-        free(serviceServerIP);
-    }
-
     close(centralServerSocket);
     close(UDPServerSocket);
     close(TCPServerSocket);
@@ -390,16 +377,34 @@ int main (int argc, char * argv[]) {
     return 0; 
 }
 
-void communicateUDP(int socket, struct sockaddr_in addr, char *message, char *reply) {
-    int bytes;
+void communicateUDP(int fd, struct sockaddr_in addr, char *message, char *reply) {
+    int bytes, counter;
+    fd_set rfds;
+    struct timeval tv;
     unsigned length = sizeof(addr);
     
     printf("\tRequest: %s\n", message);
-    bytes = sendto(socket, message, strlen(message)+1, 0, (struct sockaddr*)&addr, length);
+    bytes = sendto(fd, message, strlen(message), 0, (struct sockaddr*)&addr, length);
     if(bytes == -1) {
         exit(-1);
     }
-    bytes = recvfrom(socket, reply, BUFFER_SIZE, 0, (struct sockaddr*)&addr, &length);   
+
+    tv.tv_sec = 5;
+    tv.tv_usec = 0;
+    FD_ZERO(&rfds);
+    FD_SET(fd, &rfds);
+    counter = select(fd+1, &rfds, (fd_set *)NULL, (fd_set *)NULL, &tv);
+    if(counter < 0) {
+    	exit(-1);
+    	
+    }
+    else if(counter == 0) {
+    	printf("\tTimeout\n\n");
+    	FD_CLR(fd, &rfds);
+    	exit(-1);
+    }
+
+    bytes = recvfrom(fd, reply, BUFFER_SIZE, 0, (struct sockaddr*)&addr, &length);   
     if(bytes == -1) {
         exit(-1);
     }
