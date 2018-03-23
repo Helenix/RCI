@@ -40,6 +40,7 @@ int main (int argc, char * argv[]) {
         exit(-1);
     }
 
+    centralServerIP[0] = '\0';
     // Arguments stuff
     for(i = 1; i < argc; i = i+2) {
         if(!strcmp("-n", argv[i]) && i+1 < argc) {
@@ -85,7 +86,7 @@ int main (int argc, char * argv[]) {
     // UDP client for central server requests
     memset((void*)&centralServer,(int)'\0', sizeof(centralServer));
     centralServer.sin_family = AF_INET;
-    if(isDefaultServer || centralServerIP == NULL) { 
+    if(isDefaultServer || centralServerIP[0] == '\0') { 
         if((host = gethostbyname("tejo.tecnico.ulisboa.pt")) == NULL) {
             exit(-1);
         }
@@ -138,6 +139,7 @@ int main (int argc, char * argv[]) {
 
     stateServer = idle;
     stateClient = idle;
+
     while(1) {
         FD_ZERO(&rfds);
 		FD_SET(fileno(stdin), &rfds);
@@ -145,11 +147,11 @@ int main (int argc, char * argv[]) {
         FD_SET(TCPServerSocket, &rfds); maxfd = max(maxfd, TCPServerSocket); 
         if(stateServer == busy) {
             FD_SET(afd, &rfds); 
-            maxfd=max(maxfd,afd);
+            maxfd = max(maxfd,afd);
         }
         if(stateClient == busy) {
             FD_SET(TCPClientSocket, &rfds); 
-            maxfd=max(maxfd, TCPClientSocket);
+            maxfd = max(maxfd, TCPClientSocket);
         }    
 
         counter = select(maxfd+1, &rfds, (fd_set*)NULL, (fd_set*)NULL, (struct timeval *)NULL);
@@ -179,6 +181,7 @@ int main (int argc, char * argv[]) {
                         communicateUDP(centralServerSocket, centralServer, message, reply);
                         isDSServer = true;
                         isStartServer = true;
+                       
                         break;
 
                     case 2:
@@ -209,7 +212,8 @@ int main (int argc, char * argv[]) {
                         writeTCP(TCPClientSocket, buffer_write); 
 
                         successorID = replyID2;
-                        stateClient = busy;                  
+                        stateClient = busy;    
+                                    
                         break;
                     
                     default:
@@ -217,7 +221,7 @@ int main (int argc, char * argv[]) {
                 }
             } 
             else if(!strcmp("show_state", message)) {
-                printf("\tSuccessor ID: %d\n", successorID);
+                printf("\tSuccessor ID: %d State Server: %d State Client: %d \n", successorID, (int)stateServer, (int)stateClient);
             }
             else if(!strcmp("leave", message)) {
                     if(isDSServer) {
@@ -305,11 +309,27 @@ int main (int argc, char * argv[]) {
                 case idle: 
                     afd = newfd;
                     stateServer = busy; 
+                   
                     break;
                 case busy: 
-                    printf("\tNew client is trying to connect but server is busy\n");      
-                    shutdown(newfd, SHUT_RDWR);
-                    close(newfd);
+                    printf("\tNew client is trying to connect but server is busy\n");  
+                    //close(afd);
+                    //afd = newfd;
+                    memset(buffer_read, 0, BUFFER_SIZE);
+                    if((bytes = read(newfd, buffer_read, BUFFER_SIZE)) != 0) {
+                        if(bytes == -1) {
+                            exit(1);
+                        }
+                        if(sscanf(buffer_read, "NEW %d;%[^;];%d\n", &replyID1, replyIP, &replyPort) == 3) {
+                            memset(buffer_write, 0, BUFFER_SIZE);
+                            sprintf(buffer_write, "TOKEN %d;N;%d;%s;%d\n", serviceServerID, replyID1, replyIP, replyPort);
+                            printf("\t%s", buffer_write);
+                            writeTCP(TCPClientSocket, buffer_write);
+                        }
+                    }
+
+                    //shutdown(newfd, SHUT_RDWR);
+                    //close(newfd);
                     break;
                 default:
                     break;
@@ -339,15 +359,41 @@ int main (int argc, char * argv[]) {
                         printf("\tCould not connect\n");
                         exit(-1);    
                     } 
-  
+
                     stateClient = busy;
                     successorID = replyID1;
                 }
+                else if(sscanf(buffer_read, "TOKEN %d;N;%d;%[^;];%d\n", &replyID1, &replyID2, replyIP, &replyPort) == 4) {
+                    if(replyID1 == successorID) {
+                        printf("\tRearange\n");
+                        close(TCPClientSocket);
+
+                        TCPClientSocket = socket(AF_INET, SOCK_STREAM, 0);
+                        if(TCPClientSocket == -1) {
+                            exit(-1);
+                        }
+
+                        memset((void*)&TCPClient,(int)'\0', sizeof(TCPClient));
+                        TCPClient.sin_family = AF_INET;
+                        inet_aton(replyIP, &TCPClient.sin_addr);
+                        TCPClient.sin_port = htons((u_short)replyPort);
+
+                        if(connect(TCPClientSocket, (struct sockaddr *)&TCPClient, sizeof(TCPClient)) == -1) {
+                            printf("\tCould not connect\n");
+                            exit(-1);    
+                        } 
+                        successorID = replyID2;
+                    } 
+                    else {
+                        writeTCP(TCPClientSocket, buffer_read);
+                    }
+                }
             }
             else { 
+                
                 printf("\tSocket closed at client end!\n");
+                stateServer = idle;
                 close(afd);
-                stateServer=idle;
             }  
         }
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////    
@@ -361,8 +407,8 @@ int main (int argc, char * argv[]) {
             }
             else { 
                 printf("\tSocket closed at server end!\n");
-                close(TCPClientSocket);
                 stateClient = idle;
+                close(TCPClientSocket);
             } 
         }
     }
