@@ -17,7 +17,6 @@
 void communicateUDP(int fd, struct sockaddr_in addr, char *message, char *reply);
 int checkServerReply(char *reply, int *id1, int *id2, char *ip, unsigned *port);
 void writeTCP(int socket, char *message);
-int readTCP(int socket, char *message);
 void clearSuccessors(int *id, unsigned *port, char *ip);
 
 int main (int argc, char * argv[]) {
@@ -384,11 +383,6 @@ int main (int argc, char * argv[]) {
                     communicateUDP(centralServerSocket, centralServer, message, reply);
                     isStartServer = true;
                 }
-                else if(sscanf(buffer_read, "TOKEN %d;S\n", &replyID1) == 1) {
-                    sprintf(message,"SET_DS %d;%d;%s;%d", serviceX, serviceServerID, serviceServerIP, serviceUdpPort);
-                    communicateUDP(centralServerSocket, centralServer, message, reply);
-                    isDSServer = true;
-                }
                 else if(sscanf(buffer_read, "TOKEN %d;N;%d;%[^;];%d\n", &replyID1, &replyID2, replyIP, &replyPort) == 4) {
                     if(replyID1 == successorID) {
                         printf("\tRearange\n");
@@ -457,6 +451,11 @@ int main (int argc, char * argv[]) {
                         sprintf(successorIP, "%s", replyIP); 
                     }
                 } 
+                else if(sscanf(buffer_read, "TOKEN %d;S\n", &replyID1) == 1) {
+                    sprintf(message,"SET_DS %d;%d;%s;%d", serviceX, serviceServerID, serviceServerIP, serviceUdpPort);
+                    communicateUDP(centralServerSocket, centralServer, message, reply);
+                    isDSServer = true;
+                }
             }
             else { 
                     printf("\tSocket closed at client end!\n");
@@ -565,14 +564,6 @@ void writeTCP(int socket, char *message) {
         ptr += bytesWritten;
     }
 }
-
-/*void readTCP(int socket, unsigned size, char*message) {
-    int bytesRead = 0;
-    int result = 0;
-    while(bytesRead < size) {
-        result = readTCP();
-    } 
-}*/
 
 void clearSuccessors(int *id, unsigned *port, char *ip) {
     *id = 0;
