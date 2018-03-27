@@ -13,26 +13,28 @@
 #define DEFAULT_PORT 59000
 #define max(A,B) ((A)>=(B)?(A):(B))
 
+
 void communicateUDP(int fd, struct sockaddr_in addr, char *message, char *reply);
 int checkServerReply(char *reply, int *id1, int *id2, char *ip, unsigned *port);
 void writeTCP(int socket, char *message);
 int readTCP(int socket, char *message);
+void clearSuccessors(int *id, unsigned *port, char *ip);
 
 int main (int argc, char * argv[]) {
     int i, serviceX, serviceServerID, bytes;
     int centralServerSocket, UDPServerSocket, TCPServerSocket, TCPClientSocket, newfd, afd;
     int replyID1, replyID2;
-    int successorID = 0;
+    int successorID;
+    int maxfd, counter;
     unsigned length, TCPServerLength, centralServerLength;
-    unsigned centralServerPort = DEFAULT_PORT, serviceUdpPort, serviceTcpPort, replyPort;
-    char centralServerIP[20], serviceServerIP[20];
+    unsigned centralServerPort = DEFAULT_PORT, serviceUdpPort, serviceTcpPort, replyPort, successorPort;
+    char centralServerIP[20], serviceServerIP[20], successorIP[20];
     char message[BUFFER_SIZE], reply[BUFFER_SIZE], buffer[BUFFER_SIZE], replyIP[BUFFER_SIZE];
     char *ptr, buffer_write[BUFFER_SIZE], buffer_read[BUFFER_SIZE];
     struct sockaddr_in centralServer, UDPServer, TCPServer, TCPClient;
     struct hostent *host = NULL;
-    bool isDefaultServer = true, isStartServer = false, isDSServer = false;
+    bool isDefaultServer = true, isStartServer = false, isDSServer = false, sentTokenO = false;
     fd_set rfds;
-    int maxfd, counter;
     enum {busy, idle} stateClient, stateServer;
     
     if(argc < 9 || argc > 13) {
@@ -139,6 +141,7 @@ int main (int argc, char * argv[]) {
 
     stateServer = idle;
     stateClient = idle;
+    clearSuccessors(&successorID, &successorPort, successorIP);
 
     while(1) {
         FD_ZERO(&rfds);
@@ -204,7 +207,7 @@ int main (int argc, char * argv[]) {
 
                         if(connect(TCPClientSocket, (struct sockaddr *)&TCPClient, sizeof(TCPClient)) == -1) {
                             printf("\tCould not connect\n");
-                            exit(-1);    
+                            break;   
                         } 
                         memset(buffer_write, 0, BUFFER_SIZE);
                         sprintf(buffer_write,"NEW %d;%s;%d\n", serviceServerID, serviceServerIP, serviceTcpPort);
@@ -212,6 +215,8 @@ int main (int argc, char * argv[]) {
                         writeTCP(TCPClientSocket, buffer_write); 
 
                         successorID = replyID2;
+                        successorPort =  replyPort;
+                        sprintf(successorIP, "%s", replyIP);
                         stateClient = busy;    
                                     
                         break;
@@ -221,29 +226,44 @@ int main (int argc, char * argv[]) {
                 }
             } 
             else if(!strcmp("show_state", message)) {
-                printf("\tSuccessor ID: %d State Server: %d State Client: %d \n", successorID, (int)stateServer, (int)stateClient);
+                printf("\tSuccessor ID: %d Successor Port: %d Successor IP: %s State Server: %d State Client: %d \n", successorID, successorPort, successorIP,(int)stateServer, (int)stateClient);
             }
             else if(!strcmp("leave", message)) {
-                    if(isDSServer) {
-                    sprintf(message,"WITHDRAW_DS %d;%d", serviceX, serviceServerID);
-                    communicateUDP(centralServerSocket, centralServer, message, reply);
-                    isDSServer = false;
-                }                
-
                 if(isStartServer) {
                     sprintf(message,"WITHDRAW_START %d;%d", serviceX, serviceServerID);
                     communicateUDP(centralServerSocket, centralServer, message, reply);
+                    if(stateServer == busy && stateClient == busy) {
+                        memset(buffer_write, 0, BUFFER_SIZE);
+                        sprintf(buffer_write, "NEW_START\n");
+                        printf("\t%s", buffer_write);
+                        writeTCP(TCPClientSocket, buffer_write);
+                    }
                     isStartServer = false;
                 }
+                sleep(1);
+                if(isDSServer) {
+                    sprintf(message,"WITHDRAW_DS %d;%d", serviceX, serviceServerID);
+                    communicateUDP(centralServerSocket, centralServer, message, reply);
+                    if(stateServer == busy && stateClient == busy) {
+                        memset(buffer_write, 0, BUFFER_SIZE);
+                        sprintf(buffer_write, "TOKEN %d;S\n", serviceServerID);
+                        printf("\t%s", buffer_write);
+                        writeTCP(TCPClientSocket, buffer_write);
+                    }
+                    isDSServer = false;
+                }  
+                sleep(1);
+                if(stateServer == busy && stateClient == busy) {
+                    memset(buffer_write, 0, BUFFER_SIZE);
+                    sprintf(buffer_write, "TOKEN %d;O;%d;%s;%d\n", serviceServerID, successorID, successorIP, successorPort);
+                    printf("\t%s", buffer_write);
+                    writeTCP(TCPClientSocket, buffer_write);
+                    sentTokenO = true;
+                 }
 
-                if(stateServer == busy) {
-                    close(afd);
-                    stateServer = idle;
-                }
-                if(stateClient == busy) {
-                    close(TCPClientSocket);
-                    stateClient = idle;
-                }
+                stateServer = idle;
+                stateClient = idle;
+                clearSuccessors(&successorID, &successorPort, successorIP);
             }
             else if(!strcmp("exit", message)) {
                 if(isDSServer) {
@@ -309,12 +329,8 @@ int main (int argc, char * argv[]) {
                 case idle: 
                     afd = newfd;
                     stateServer = busy; 
-                   
                     break;
                 case busy: 
-                    printf("\tNew client is trying to connect but server is busy\n");  
-                    //close(afd);
-                    //afd = newfd;
                     memset(buffer_read, 0, BUFFER_SIZE);
                     if((bytes = read(newfd, buffer_read, BUFFER_SIZE)) != 0) {
                         if(bytes == -1) {
@@ -328,8 +344,6 @@ int main (int argc, char * argv[]) {
                         }
                     }
 
-                    //shutdown(newfd, SHUT_RDWR);
-                    //close(newfd);
                     break;
                 default:
                     break;
@@ -362,12 +376,26 @@ int main (int argc, char * argv[]) {
 
                     stateClient = busy;
                     successorID = replyID1;
+                    successorPort =  replyPort;
+                    sprintf(successorIP, "%s", replyIP);
+                }
+                else if(!strcmp("NEW_START\n", buffer_read)) {
+                    sprintf(message,"SET_START %d;%d;%s;%d", serviceX, serviceServerID, serviceServerIP, serviceTcpPort);
+                    communicateUDP(centralServerSocket, centralServer, message, reply);
+                    isStartServer = true;
+                }
+                else if(sscanf(buffer_read, "TOKEN %d;S\n", &replyID1) == 1) {
+                    sprintf(message,"SET_DS %d;%d;%s;%d", serviceX, serviceServerID, serviceServerIP, serviceUdpPort);
+                    communicateUDP(centralServerSocket, centralServer, message, reply);
+                    isDSServer = true;
                 }
                 else if(sscanf(buffer_read, "TOKEN %d;N;%d;%[^;];%d\n", &replyID1, &replyID2, replyIP, &replyPort) == 4) {
                     if(replyID1 == successorID) {
                         printf("\tRearange\n");
-                        close(TCPClientSocket);
 
+                        close(TCPClientSocket);
+                        
+                        // meter em função
                         TCPClientSocket = socket(AF_INET, SOCK_STREAM, 0);
                         if(TCPClientSocket == -1) {
                             exit(-1);
@@ -383,18 +411,66 @@ int main (int argc, char * argv[]) {
                             exit(-1);    
                         } 
                         successorID = replyID2;
+                        successorPort =  replyPort;
+                        sprintf(successorIP, "%s", replyIP);
                     } 
                     else {
                         writeTCP(TCPClientSocket, buffer_read);
                     }
                 }
+                else if(sscanf(buffer_read, "TOKEN %d;O;%d;%[^;];%d\n", &replyID1, &replyID2, replyIP, &replyPort) == 4) {
+                    if(replyID1 == successorID && replyID2 == serviceServerID) {
+                        printf("\tRearange leave1\n");
+                        close(afd);
+                        close(TCPClientSocket);
+                        stateServer = idle;
+                        stateClient = idle;
+                        clearSuccessors(&successorID, &successorPort, successorIP);
+                    } 
+                    else if(replyID2 == serviceServerID) {
+                        printf("\tRearange leave2\n");
+                        close(afd);
+                        stateServer = idle;
+                        writeTCP(TCPClientSocket, buffer_read);
+                    }
+                    else if(replyID1 == successorID) {
+                        printf("\tRearange leave3\n");
+                        close(TCPClientSocket);
+                        
+                        // meter em função
+                        TCPClientSocket = socket(AF_INET, SOCK_STREAM, 0);
+                        if(TCPClientSocket == -1) {
+                            exit(-1);
+                        }
+
+                        memset((void*)&TCPClient,(int)'\0', sizeof(TCPClient));
+                        TCPClient.sin_family = AF_INET;
+                        inet_aton(replyIP, &TCPClient.sin_addr);
+                        TCPClient.sin_port = htons((u_short)replyPort);
+
+                        if(connect(TCPClientSocket, (struct sockaddr *)&TCPClient, sizeof(TCPClient)) == -1) {
+                            printf("\tCould not connect\n");
+                            exit(-1);    
+                        } 
+                        successorID = replyID2;
+                        successorPort =  replyPort;
+                        sprintf(successorIP, "%s", replyIP); 
+                    }
+                } 
             }
             else { 
-                
-                printf("\tSocket closed at client end!\n");
-                stateServer = idle;
-                close(afd);
-            }  
+                    printf("\tSocket closed at client end!\n");
+                    close(afd);
+
+                    if(sentTokenO) {
+                        stateServer = idle;
+                        sentTokenO = false;
+                        clearSuccessors(&successorID, &successorPort, successorIP);
+                    }
+                    else {
+                        afd = newfd;
+                    }
+             }  
         }
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////    
         else if(stateClient == busy && FD_ISSET(TCPClientSocket, &rfds)) {
@@ -488,4 +564,18 @@ void writeTCP(int socket, char *message) {
         bytesLeft -= bytesWritten; 
         ptr += bytesWritten;
     }
+}
+
+/*void readTCP(int socket, unsigned size, char*message) {
+    int bytesRead = 0;
+    int result = 0;
+    while(bytesRead < size) {
+        result = readTCP();
+    } 
+}*/
+
+void clearSuccessors(int *id, unsigned *port, char *ip) {
+    *id = 0;
+    *port = 0;
+    ip[0] = '\0';
 }
