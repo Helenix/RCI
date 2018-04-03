@@ -26,24 +26,23 @@ int main (int argc, char * argv[]) {
     int centralServerSocket, DS_Socket, maxfd, counter;
     fd_set rfds;
     unsigned centralServerPort = DEFAULT_PORT, serviceUdpPort, serviceTcpPort;
-    char *centralServerIP = NULL;
+    char centralServerIP[20];
     char message[BUFFER_SIZE], reply[BUFFER_SIZE], buffer[BUFFER_SIZE];
     struct sockaddr_in centralServer, DS_Server;
     struct hostent *host = NULL;
     bool isDefaultServer = true;
     enum {busy, idle} state;
 
-    
     if(argc < 1 || argc > 5) {
         printf("Invalid number of arguments\n");
         exit(-1);
     }
 
     // Arguments stuff
+    centralServerIP[0] = '\0';
     for(i = 1; i < argc; i = i+2) {
         if(!strcmp("-i", argv[i]) && i+1 < argc) {
-            centralServerIP = (char*) malloc(sizeof(argv[i+1]+1));
-            strcpy(centralServerIP,argv[i+1]);
+            sprintf(centralServerIP, "%s", argv[i+1]);
             isDefaultServer = false;
         } else if(!strcmp("-p", argv[i]) && i+1 < argc) {
             centralServerPort = atoi(argv[i+1]);
@@ -53,8 +52,6 @@ int main (int argc, char * argv[]) {
             exit(-1);
         }
     }
-
-
 
     centralServerSocket = socket(AF_INET, SOCK_DGRAM, 0);
     if(centralServerSocket == -1) {
@@ -68,7 +65,7 @@ int main (int argc, char * argv[]) {
     // UDP client for central server requests
     memset((void*)&centralServer,(int)'\0', sizeof(centralServer));
     centralServer.sin_family = AF_INET;
-    if(isDefaultServer || centralServerIP == NULL) { 
+    if(isDefaultServer || centralServerIP[0] == '\0') { 
         if((host = gethostbyname("tejo.tecnico.ulisboa.pt")) == NULL) {
             exit(-1);
         }
@@ -78,11 +75,6 @@ int main (int argc, char * argv[]) {
     }
     centralServer.sin_port = htons((u_short)centralServerPort);
     centralServerLength = sizeof(centralServer);
-
-
-
-
-
 
     // Central server and service information
     if(isDefaultServer) {
@@ -94,17 +86,16 @@ int main (int argc, char * argv[]) {
     printf("Central Server port : %d \n", ntohs(centralServer.sin_port));
     printf("\nType 'help' for valid commands\n");
 
-
     state = idle;
-
     while(1) {
         FD_ZERO(&rfds);
         FD_SET(fileno(stdin), &rfds); maxfd = fileno(stdin) ;
         FD_SET(DS_Socket, &rfds); maxfd = max(maxfd, DS_Socket);
 
-
-        counter=select(maxfd+1,&rfds, (fd_set*)NULL,(fd_set*)NULL, (struct timeval *)NULL);
-        if(counter <= 0)exit(1);//error
+        counter = select(maxfd+1,&rfds, (fd_set*)NULL,(fd_set*)NULL, (struct timeval *)NULL);
+        if(counter <= 0) {
+            exit(1);
+        }
 
         if(FD_ISSET(fileno(stdin),&rfds)){
             fgets(buffer, sizeof(buffer), stdin);
@@ -115,12 +106,10 @@ int main (int argc, char * argv[]) {
                     case idle:
                         sprintf(message,"GET_DS_SERVER %d", serviceReqX);
                         communicateUDP(centralServerSocket, centralServer, message, reply);
-
                             switch (checkServerReply(reply, &id_DS, ip_DS, &port_DS)) {
                                 case 0:
                                     printf("\tNo DS Server!\n");
                                     break;
-
                                 case 1:
                                     memset((void*)&DS_Server,(int)'\0', sizeof(DS_Server));
                                     DS_Server.sin_family = AF_INET;
@@ -130,7 +119,6 @@ int main (int argc, char * argv[]) {
                                     communicateUDP(DS_Socket, DS_Server, "MY SERVICE ON", reply);
                                     state = busy;
                                     break;
-
                                 default:
                                     break;
                             }
@@ -140,11 +128,8 @@ int main (int argc, char * argv[]) {
                         break;
                     default:
                         break;       
-                       
                 }
             }
-
-            
             else if(!strcmp("terminate_service",message)|| !strcmp("ts",message)) {
                 switch(state){
                     case idle:
@@ -156,7 +141,6 @@ int main (int argc, char * argv[]) {
                         break;
                     default:
                         break;
-
                 }
             }
             else if(!strcmp("exit",message)) {
@@ -177,21 +161,11 @@ int main (int argc, char * argv[]) {
                 printf("-> help \n");
                 printf("-> exit \n");  
             }
-            else{
+            else {
                 printf("Invalid Command!\n Type 'help' for valid commands\n");
             }
         }
-
-        if(FD_ISSET(DS_Socket,&rfds)){
-        }
-         //??????????
-        }
-
-    if(centralServerIP != NULL) {
-        free(centralServerIP);
     }
-
-
     close(centralServerSocket);
     close(DS_Socket);
 
@@ -205,22 +179,26 @@ int communicateUDP(int fd, struct sockaddr_in addr, char *message, char *reply) 
     unsigned length = sizeof(addr);
     printf("\tServer request: %s\n", message);
     bytes = sendto(fd, message,strlen(message), 0, (struct sockaddr*)&addr, length);
-    if (bytes == -1){
+    if (bytes == -1) {
         exit(-1);
     }
 
     tv.tv_sec = 5;
     tv.tv_usec = 0;
-    
 
     FD_ZERO(&rfds);
     FD_SET(fd, &rfds);
 
-    counter=select(fd+1,&rfds, (fd_set*)NULL,(fd_set*)NULL, &tv);
-    if(counter < 0) {exit(1);}//error
-    else if (counter == 0){printf("\ttimeout\n"); FD_CLR(fd, &rfds);exit(1);}//timeout
+    counter = select(fd+1,&rfds, (fd_set*)NULL,(fd_set*)NULL, &tv);
+    if(counter < 0) {
+        exit(1);
+    } 
+    else if (counter == 0) {
+        printf("\ttimeout: udp server is down\n"); 
+        FD_CLR(fd, &rfds);
+        exit(1);
+    }
 
-    
     bytes = recvfrom(fd, reply, BUFFER_SIZE, 0, (struct sockaddr*)&addr, &length);   
     if (bytes == -1){
         exit(-1);
@@ -232,7 +210,6 @@ int communicateUDP(int fd, struct sockaddr_in addr, char *message, char *reply) 
 }
 
 int checkServerReply(char *reply, int *id, char *ip, unsigned *port) {
-
     sscanf(reply, "OK %d;%[^;];%d", id, ip, port);
     if(*id <= 0) {
         return 0;
@@ -241,6 +218,3 @@ int checkServerReply(char *reply, int *id, char *ip, unsigned *port) {
         return 1;
     } 
 }
-
-
-//sendto = bytes_sent
