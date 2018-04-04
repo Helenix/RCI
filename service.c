@@ -255,7 +255,9 @@ int main (int argc, char * argv[]) {
                         }
                         isStartServer = false;
                     }
-                    sleep(1);
+
+                    //sleep(1);
+                    
                     if(isDSServer) {
                         sprintf(message,"WITHDRAW_DS %d;%d", serviceX, serviceServerID);
                         communicateUDP(centralServerSocket, centralServer, message, reply);
@@ -265,8 +267,10 @@ int main (int argc, char * argv[]) {
                             writeTCP(TCPClientSocket, buffer_write);
                         }
                         isDSServer = false;
-                    }  
-                    sleep(1);
+                    }
+
+                    //sleep(1);
+                    
                     if(stateServer == busy && stateClient == busy) {
                         memset(buffer_write, 0, BUFFER_SIZE);
                         sprintf(buffer_write, "TOKEN %d;O;%d;%s;%d\n", serviceServerID, successorID, successorIP, successorPort);
@@ -294,7 +298,9 @@ int main (int argc, char * argv[]) {
                         }
                         isStartServer = false;
                     }
-                    sleep(1);
+
+                    //sleep(1);
+                    
                     if(isDSServer) {
                         sprintf(message,"WITHDRAW_DS %d;%d", serviceX, serviceServerID);
                         communicateUDP(centralServerSocket, centralServer, message, reply);
@@ -304,7 +310,9 @@ int main (int argc, char * argv[]) {
                             writeTCP(TCPClientSocket, buffer_write);
                         }
                     }  
-                    sleep(1);
+                    
+                    //sleep(1);
+                    
                     if(stateServer == busy && stateClient == busy) {
                         memset(buffer_write, 0, BUFFER_SIZE);
                         sprintf(buffer_write, "TOKEN %d;O;%d;%s;%d\n", serviceServerID, successorID, successorIP, successorPort);
@@ -380,20 +388,22 @@ int main (int argc, char * argv[]) {
                         if(bytes == -1) {
                             exit(1);
                         }
+                        printf("\t-> Received: %s", buffer_read);
+
                         if(sscanf(buffer_read, "NEW %d;%[^;];%d\n", &replyID1, replyIP, &replyPort) == 3) {
                             memset(buffer_write, 0, BUFFER_SIZE);
                             sprintf(buffer_write, "TOKEN %d;N;%d;%s;%d\n", serviceServerID, replyID1, replyIP, replyPort);
                             writeTCP(TCPClientSocket, buffer_write);
                             
-                            sleep(1);
+                            //sleep(1);
+
                             if(!ringAvailable) {
                                 memset(buffer_write, 0, BUFFER_SIZE);
                                 sprintf(buffer_write, "TOKEN %d;S\n", serviceServerID);
                                 writeTCP(TCPClientSocket, buffer_write);
-                            }
 
-                            sleep(1);
-                            if(!ringAvailable) {
+                                //sleep(1);
+
                                 memset(buffer_write, 0, BUFFER_SIZE);
                                 sprintf(buffer_write, "TOKEN %d;D\n", replyID1);
                                 writeTCP(TCPClientSocket, buffer_write);
@@ -600,6 +610,9 @@ int main (int argc, char * argv[]) {
                         successorID = replyID2;
                         successorPort =  replyPort;
                         sprintf(successorIP, "%s", replyIP); 
+                    }
+                    else {
+                    	writeTCP(TCPClientSocket, buffer_read);
                     }
                 } 
                 else {
