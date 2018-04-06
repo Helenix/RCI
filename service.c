@@ -9,7 +9,7 @@
 #include <arpa/inet.h> 
 #include <stdbool.h>
 
-#define BUFFER_SIZE 128
+#define BUFFER_SIZE 512
 #define DEFAULT_PORT 59000
 #define max(A,B) ((A)>=(B)?(A):(B))
 
@@ -21,6 +21,8 @@ void clearSuccessors(int *id, unsigned *port, char *ip);
 char checkToken(char *message);
 char* checkServiceState(int state);
 char* checkRingState(bool availability);
+int countEndLines(char *buffer, int endLines);
+char* divideBuffer(char *pointerPosition, char *divBuffer);
 
 int main (int argc, char * argv[]) {
     int i, serviceX, serviceServerID, bytes;
@@ -40,6 +42,10 @@ int main (int argc, char * argv[]) {
     enum {idle, busy} stateClient, stateServer;
     enum {on, off} serviceState;
     char tokenType;
+
+    int endLines = 0;
+    char *pointerPosition;
+    char divBuffer[BUFFER_SIZE];
 
     if(argc < 9 || argc > 13) {
         printf("Invalid number of arguments\n");
@@ -255,8 +261,6 @@ int main (int argc, char * argv[]) {
                         }
                         isStartServer = false;
                     }
-
-                    //sleep(1);
                     
                     if(isDSServer) {
                         sprintf(message,"WITHDRAW_DS %d;%d", serviceX, serviceServerID);
@@ -268,8 +272,6 @@ int main (int argc, char * argv[]) {
                         }
                         isDSServer = false;
                     }
-
-                    //sleep(1);
                     
                     if(stateServer == busy && stateClient == busy) {
                         memset(buffer_write, 0, BUFFER_SIZE);
@@ -298,8 +300,6 @@ int main (int argc, char * argv[]) {
                         }
                         isStartServer = false;
                     }
-
-                    //sleep(1);
                     
                     if(isDSServer) {
                         sprintf(message,"WITHDRAW_DS %d;%d", serviceX, serviceServerID);
@@ -310,8 +310,7 @@ int main (int argc, char * argv[]) {
                             writeTCP(TCPClientSocket, buffer_write);
                         }
                     }  
-                    
-                    //sleep(1);
+                  
                     
                     if(stateServer == busy && stateClient == busy) {
                         memset(buffer_write, 0, BUFFER_SIZE);
@@ -393,16 +392,12 @@ int main (int argc, char * argv[]) {
                         if(sscanf(buffer_read, "NEW %d;%[^;];%d\n", &replyID1, replyIP, &replyPort) == 3) {
                             memset(buffer_write, 0, BUFFER_SIZE);
                             sprintf(buffer_write, "TOKEN %d;N;%d;%s;%d\n", serviceServerID, replyID1, replyIP, replyPort);
-                            writeTCP(TCPClientSocket, buffer_write);
-                            
-                            //sleep(1);
+                            writeTCP(TCPClientSocket, buffer_write);                        
 
                             if(!ringAvailable) {
                                 memset(buffer_write, 0, BUFFER_SIZE);
                                 sprintf(buffer_write, "TOKEN %d;S\n", serviceServerID);
                                 writeTCP(TCPClientSocket, buffer_write);
-
-                                //sleep(1);
 
                                 memset(buffer_write, 0, BUFFER_SIZE);
                                 sprintf(buffer_write, "TOKEN %d;D\n", replyID1);
@@ -423,203 +418,211 @@ int main (int argc, char * argv[]) {
                 if(bytes == -1) {
                     exit(1);
                 }
-                printf("\t-> Received: %s", buffer_read);
-                
-                if(strstr(buffer_read, "TOKEN ") != NULL) {
-                    tokenType = checkToken(buffer_read);
-                 }
-                
-                if(sscanf(buffer_read, "NEW %d;%[^;];%d\n", &replyID1, replyIP, &replyPort) == 3) {
-                    TCPClientSocket = socket(AF_INET, SOCK_STREAM, 0);
-                    if(TCPClientSocket == -1) {
-                        exit(-1);
-                    }
+               
+                pointerPosition = &buffer_read[0];
+                endLines = countEndLines(buffer_read, endLines); 
 
-                    memset((void*)&TCPClient,(int)'\0', sizeof(TCPClient));
-                    TCPClient.sin_family = AF_INET;
-                    inet_aton(replyIP, &TCPClient.sin_addr);
-                    TCPClient.sin_port = htons((u_short)replyPort);
+                while(endLines > 0) {
+	                pointerPosition = divideBuffer(pointerPosition, divBuffer);
+					printf("\t-> Received: %s", divBuffer);
 
-                    if(connect(TCPClientSocket, (struct sockaddr *)&TCPClient, sizeof(TCPClient)) == -1) {
-                        printf("\tCould not connect\n");
-                        exit(-1);    
-                    } 
+	                if(strstr(divBuffer, "TOKEN ") != NULL) {
+	                    tokenType = checkToken(divBuffer);
+	                 }
+	                
+	                if(sscanf(divBuffer, "NEW %d;%[^;];%d\n", &replyID1, replyIP, &replyPort) == 3) {
+	                    TCPClientSocket = socket(AF_INET, SOCK_STREAM, 0);
+	                    if(TCPClientSocket == -1) {
+	                        exit(-1);
+	                    }
 
-                    stateClient = busy;
-                    successorID = replyID1;
-                    successorPort =  replyPort;
-                    sprintf(successorIP, "%s", replyIP);
-                    if(!ringAvailable) {
-                        memset(buffer_write, 0, BUFFER_SIZE);
-                        sprintf(buffer_write, "TOKEN %d;S\n", serviceServerID);
-                        writeTCP(TCPClientSocket, buffer_write);
-                    }
-                }
-                else if(!strcmp("NEW_START\n", buffer_read)) {
-                    sprintf(message,"SET_START %d;%d;%s;%d", serviceX, serviceServerID, serviceServerIP, serviceTcpPort);
-                    communicateUDP(centralServerSocket, centralServer, message, reply);
-                    isStartServer = true;
-                }
-                else if(tokenType == 'N') {
-                    if(sscanf(buffer_read, "TOKEN %d;N;%d;%[^;];%d\n", &replyID1, &replyID2, replyIP, &replyPort) != 4) {
-                        printf("\tInvalid type of received message\n");
-                        exit(-1);
-                    }
+	                    memset((void*)&TCPClient,(int)'\0', sizeof(TCPClient));
+	                    TCPClient.sin_family = AF_INET;
+	                    inet_aton(replyIP, &TCPClient.sin_addr);
+	                    TCPClient.sin_port = htons((u_short)replyPort);
 
-                    if(replyID1 == successorID) {
-                        close(TCPClientSocket);
-                        
-                        // meter em função
-                        TCPClientSocket = socket(AF_INET, SOCK_STREAM, 0);
-                        if(TCPClientSocket == -1) {
-                            exit(-1);
-                        }
+	                    if(connect(TCPClientSocket, (struct sockaddr *)&TCPClient, sizeof(TCPClient)) == -1) {
+	                        printf("\tCould not connect\n");
+	                        exit(-1);    
+	                    } 
 
-                        memset((void*)&TCPClient,(int)'\0', sizeof(TCPClient));
-                        TCPClient.sin_family = AF_INET;
-                        inet_aton(replyIP, &TCPClient.sin_addr);
-                        TCPClient.sin_port = htons((u_short)replyPort);
+	                    stateClient = busy;
+	                    successorID = replyID1;
+	                    successorPort =  replyPort;
+	                    sprintf(successorIP, "%s", replyIP);
+	                    if(!ringAvailable) {
+	                        memset(buffer_write, 0, BUFFER_SIZE);
+	                        sprintf(buffer_write, "TOKEN %d;S\n", serviceServerID);
+	                        writeTCP(TCPClientSocket, buffer_write);
+	                    }
+	                }
+	                else if(!strcmp("NEW_START\n", divBuffer)) {
+	                    sprintf(message,"SET_START %d;%d;%s;%d", serviceX, serviceServerID, serviceServerIP, serviceTcpPort);
+	                    communicateUDP(centralServerSocket, centralServer, message, reply);
+	                    isStartServer = true;
+	                }
+	                else if(tokenType == 'N') {
+	                    if(sscanf(divBuffer, "TOKEN %d;N;%d;%[^;];%d\n", &replyID1, &replyID2, replyIP, &replyPort) != 4) {
+	                        printf("\tInvalid type of received message\n");
+	                        exit(-1);
+	                    }
 
-                        if(connect(TCPClientSocket, (struct sockaddr *)&TCPClient, sizeof(TCPClient)) == -1) {
-                            printf("\tCould not connect\n");
-                            exit(-1);    
-                        } 
-                        successorID = replyID2;
-                        successorPort =  replyPort;
-                        sprintf(successorIP, "%s", replyIP);
-                    } 
-                    else {
-                        writeTCP(TCPClientSocket, buffer_read);
-                    }
-                }
-                else if(tokenType == 'S') {
-                    if(sscanf(buffer_read, "TOKEN %d;S\n", &replyID1) != 1) {
-                        printf("\tInvalid type of received message\n");
-                        exit(-1);
-                    }
+	                    if(replyID1 == successorID) {
+	                        close(TCPClientSocket);
+	                        
+	                        // meter em função
+	                        TCPClientSocket = socket(AF_INET, SOCK_STREAM, 0);
+	                        if(TCPClientSocket == -1) {
+	                            exit(-1);
+	                        }
 
-                    if(serviceServerID != replyID1) {
-                        if(serviceState == off) {
-                            sprintf(message,"SET_DS %d;%d;%s;%d",  serviceX, serviceServerID, serviceServerIP, serviceUdpPort);
-                            communicateUDP(centralServerSocket, centralServer, message, reply);
+	                        memset((void*)&TCPClient,(int)'\0', sizeof(TCPClient));
+	                        TCPClient.sin_family = AF_INET;
+	                        inet_aton(replyIP, &TCPClient.sin_addr);
+	                        TCPClient.sin_port = htons((u_short)replyPort);
 
-                            memset(buffer_write, 0, BUFFER_SIZE);
-                            sprintf(buffer_write, "TOKEN %d;T\n", replyID1);
-                            writeTCP(TCPClientSocket, buffer_write);
+	                        if(connect(TCPClientSocket, (struct sockaddr *)&TCPClient, sizeof(TCPClient)) == -1) {
+	                            printf("\tCould not connect\n");
+	                            exit(-1);    
+	                        } 
+	                        successorID = replyID2;
+	                        successorPort =  replyPort;
+	                        sprintf(successorIP, "%s", replyIP);
+	                    } 
+	                    else {
+	                        writeTCP(TCPClientSocket, divBuffer);
+	                    }
+	                }
+	                else if(tokenType == 'S') {
+	                    if(sscanf(divBuffer, "TOKEN %d;S\n", &replyID1) != 1) {
+	                        printf("\tInvalid type of received message\n");
+	                        exit(-1);
+	                    }
 
-                            isDSServer = true;
-                        }
-                        else {
-                            writeTCP(TCPClientSocket, buffer_read);
-                        }
-                    }
-                    else {
-                        printf("\tRing not available\n");
-                        memset(buffer_write, 0, BUFFER_SIZE);
-                        sprintf(buffer_write, "TOKEN %d;I\n", serviceServerID);
-                        writeTCP(TCPClientSocket, buffer_write);
-                        
-                        ringAvailable = false;
-                    }
-                }
-                else if(tokenType == 'T') {
-                    ringAvailable = true;
-                    if(sscanf(buffer_read, "TOKEN %d;T\n", &replyID1) != 1) {
-                        printf("\tInvalid type of received message\n");
-                        exit(-1);
-                    }
+	                    if(serviceServerID != replyID1) {
+	                        if(serviceState == off) {
+	                            sprintf(message,"SET_DS %d;%d;%s;%d",  serviceX, serviceServerID, serviceServerIP, serviceUdpPort);
+	                            communicateUDP(centralServerSocket, centralServer, message, reply);
 
-                    if(replyID1 != serviceServerID) {
-                        writeTCP(TCPClientSocket, buffer_read);
-                    }
-                    else {
-                        printf("\tNew DS server found\n");
-                    }
-                }
-                else if(tokenType == 'I') {
-                    if(sscanf(buffer_read, "TOKEN %d;I\n", &replyID1) != 1) {
-                        printf("\tInvalid type of received message\n");
-                        exit(-1);
-                    }
+	                            memset(buffer_write, 0, BUFFER_SIZE);
+	                            sprintf(buffer_write, "TOKEN %d;T\n", replyID1);
+	                            writeTCP(TCPClientSocket, buffer_write);
 
-                    if(replyID1 != serviceServerID) {
-                        writeTCP(TCPClientSocket, buffer_read);
-                        ringAvailable = false;
-                    }
-                    else {
-                        printf("\tAll servers warned that the ring is unavailable\n");
-                    }
-                }
-                else if(tokenType == 'D') {
-                    ringAvailable = true;
-                    if(sscanf(buffer_read, "TOKEN %d;D\n", &replyID1) != 1) {
-                        printf("\tInvalid type of received message\n");
-                        exit(-1);
-                    }
-            
-                    if(serviceServerID > replyID1 || serviceState == on) {
-                        writeTCP(TCPClientSocket, buffer_read);
-                    }
-                    else {
-                        if(serviceServerID != replyID1) {
-                            printf("\tTOKEN %d;D Blocked\n", replyID1);
-                        }
-                        else {
-                            sprintf(message,"SET_DS %d;%d;%s;%d", serviceX, serviceServerID, serviceServerIP, serviceUdpPort);
-                            communicateUDP(centralServerSocket, centralServer, message, reply);
-                            isDSServer = true;
-                        }
-                    }
-                }
-                else if(tokenType == 'O') {
-                    if(sscanf(buffer_read, "TOKEN %d;O;%d;%[^;];%d\n", &replyID1, &replyID2, replyIP, &replyPort) != 4) {
-                        printf("\tInvalid type of received message\n");
-                        exit(-1);
-                    }
+	                            isDSServer = true;
+	                        }
+	                        else {
+	                            writeTCP(TCPClientSocket, divBuffer);
+	                        }
+	                    }
+	                    else {
+	                        printf("\tRing not available\n");
+	                        memset(buffer_write, 0, BUFFER_SIZE);
+	                        sprintf(buffer_write, "TOKEN %d;I\n", serviceServerID);
+	                        writeTCP(TCPClientSocket, buffer_write);
+	                        
+	                        ringAvailable = false;
+	                    }
+	                }
+	                else if(tokenType == 'T') {
+	                    ringAvailable = true;
+	                    if(sscanf(divBuffer, "TOKEN %d;T\n", &replyID1) != 1) {
+	                        printf("\tInvalid type of received message\n");
+	                        exit(-1);
+	                    }
 
-                    if(replyID1 == successorID && replyID2 == serviceServerID) {
-                        close(afd);
-                        close(TCPClientSocket);
-                        stateServer = idle;
-                        stateClient = idle;
-                        clearSuccessors(&successorID, &successorPort, successorIP);
-                    } 
-                    else if(replyID2 == serviceServerID) {
-                        close(afd);
-                        stateServer = idle;
-                        writeTCP(TCPClientSocket, buffer_read);
-                    }
-                    else if(replyID1 == successorID) {
-                        close(TCPClientSocket);
-                        
-                        // meter em função
-                        TCPClientSocket = socket(AF_INET, SOCK_STREAM, 0);
-                        if(TCPClientSocket == -1) {
-                            exit(-1);
-                        }
+	                    if(replyID1 != serviceServerID) {
+	                        writeTCP(TCPClientSocket, divBuffer);
+	                    }
+	                    else {
+	                        printf("\tNew DS server found\n");
+	                    }
+	                }
+	                else if(tokenType == 'I') {
+	                    if(sscanf(divBuffer, "TOKEN %d;I\n", &replyID1) != 1) {
+	                        printf("\tInvalid type of received message\n");
+	                        exit(-1);
+	                    }
 
-                        memset((void*)&TCPClient,(int)'\0', sizeof(TCPClient));
-                        TCPClient.sin_family = AF_INET;
-                        inet_aton(replyIP, &TCPClient.sin_addr);
-                        TCPClient.sin_port = htons((u_short)replyPort);
+	                    if(replyID1 != serviceServerID) {
+	                        writeTCP(TCPClientSocket, divBuffer);
+	                        ringAvailable = false;
+	                    }
+	                    else {
+	                        printf("\tAll servers warned that the ring is unavailable\n");
+	                    }
+	                }
+	                else if(tokenType == 'D') {
+	                    ringAvailable = true;
+	                    if(sscanf(divBuffer, "TOKEN %d;D\n", &replyID1) != 1) {
+	                        printf("\tInvalid type of received message\n");
+	                        exit(-1);
+	                    }
+	            
+	                    if(serviceServerID > replyID1 || serviceState == on) {
+	                        writeTCP(TCPClientSocket, divBuffer);
+	                    }
+	                    else {
+	                        if(serviceServerID != replyID1) {
+	                            printf("\tTOKEN %d;D Blocked\n", replyID1);
+	                        }
+	                        else {
+	                            sprintf(message,"SET_DS %d;%d;%s;%d", serviceX, serviceServerID, serviceServerIP, serviceUdpPort);
+	                            communicateUDP(centralServerSocket, centralServer, message, reply);
+	                            isDSServer = true;
+	                        }
+	                    }
+	                }
+	                else if(tokenType == 'O') {
+	                    if(sscanf(divBuffer, "TOKEN %d;O;%d;%[^;];%d\n", &replyID1, &replyID2, replyIP, &replyPort) != 4) {
+	                        printf("\tInvalid type of received message\n");
+	                        exit(-1);
+	                    }
 
-                        if(connect(TCPClientSocket, (struct sockaddr *)&TCPClient, sizeof(TCPClient)) == -1) {
-                            printf("\tCould not connect\n");
-                            exit(-1);    
-                        } 
-                        successorID = replyID2;
-                        successorPort =  replyPort;
-                        sprintf(successorIP, "%s", replyIP); 
-                    }
-                    else {
-                    	writeTCP(TCPClientSocket, buffer_read);
-                    }
-                } 
-                else {
-                    printf("\tInvalid type of received message\n");
-                    exit(-1);
-                }            
-            }
+	                    if(replyID1 == successorID && replyID2 == serviceServerID) {
+	                        close(afd);
+	                        close(TCPClientSocket);
+	                        stateServer = idle;
+	                        stateClient = idle;
+	                        clearSuccessors(&successorID, &successorPort, successorIP);
+	                    } 
+	                    else if(replyID2 == serviceServerID) {
+	                        close(afd);
+	                        stateServer = idle;
+	                        writeTCP(TCPClientSocket, divBuffer);
+	                    }
+	                    else if(replyID1 == successorID) {
+	                        close(TCPClientSocket);
+	                        
+	                        // meter em função
+	                        TCPClientSocket = socket(AF_INET, SOCK_STREAM, 0);
+	                        if(TCPClientSocket == -1) {
+	                            exit(-1);
+	                        }
+
+	                        memset((void*)&TCPClient,(int)'\0', sizeof(TCPClient));
+	                        TCPClient.sin_family = AF_INET;
+	                        inet_aton(replyIP, &TCPClient.sin_addr);
+	                        TCPClient.sin_port = htons((u_short)replyPort);
+
+	                        if(connect(TCPClientSocket, (struct sockaddr *)&TCPClient, sizeof(TCPClient)) == -1) {
+	                            printf("\tCould not connect\n");
+	                            exit(-1);    
+	                        } 
+	                        successorID = replyID2;
+	                        successorPort =  replyPort;
+	                        sprintf(successorIP, "%s", replyIP); 
+	                    }
+	                    else {
+	                    	writeTCP(TCPClientSocket, divBuffer);
+	                    }
+	                } 
+	                else {
+	                    printf("\tInvalid type of received message\n");
+	                    exit(-1);
+	                }            
+	            	endLines--;
+	           	}
+	        }
             else { 
                 printf("\tSocket closed at client end!\n");
                 close(afd);
@@ -760,4 +763,33 @@ char* checkRingState(bool availability) {
     } else {
         return "Unavailable";
     }
+}
+
+int countEndLines(char *buffer, int endLines) {
+    int i;
+   
+
+    for(i = 0; i < strlen(buffer); i++) {
+        if(buffer[i] == '\n') {
+            endLines++;
+        }
+    }
+
+    return endLines;
+}
+
+char* divideBuffer(char *pointerPosition, char *divBuffer) {
+    int i = 0;
+    int endLines = 0;
+ 
+    while(pointerPosition[i] != '\n') {
+        divBuffer[i] = pointerPosition[i];
+        i++;
+    }
+    divBuffer[i] = '\n';
+    divBuffer[i+1] = '\0';
+    
+    pointerPosition += i+1;
+
+    return pointerPosition;
 }
