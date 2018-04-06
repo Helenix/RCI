@@ -319,7 +319,7 @@ int main (int argc, char * argv[]) {
                     }
                     break;
                 }
-            } 
+            }
             else if(!strcmp("help", message)) {
             printf("Valid commands: \n");
             printf("-> join x \n");
@@ -420,7 +420,11 @@ int main (int argc, char * argv[]) {
                 }
                
                 pointerPosition = &buffer_read[0];
-                endLines = countEndLines(buffer_read, endLines); 
+                endLines = countEndLines(buffer_read, endLines);
+                if(endLines == 0) {
+                	printf("\tInvalid type of received message\n");
+                	exit(-1);
+                }
 
                 while(endLines > 0) {
 	                pointerPosition = divideBuffer(pointerPosition, divBuffer);
@@ -428,7 +432,11 @@ int main (int argc, char * argv[]) {
 
 	                if(strstr(divBuffer, "TOKEN ") != NULL) {
 	                    tokenType = checkToken(divBuffer);
-	                 }
+	                }
+	                else {
+	                	tokenType = ' ';
+	                }
+
 	                
 	                if(sscanf(divBuffer, "NEW %d;%[^;];%d\n", &replyID1, replyIP, &replyPort) == 3) {
 	                    TCPClientSocket = socket(AF_INET, SOCK_STREAM, 0);
@@ -788,7 +796,7 @@ char* divideBuffer(char *pointerPosition, char *divBuffer) {
     }
     divBuffer[i] = '\n';
     divBuffer[i+1] = '\0';
-    
+
     pointerPosition += i+1;
 
     return pointerPosition;
