@@ -37,7 +37,7 @@ int main (int argc, char * argv[]) {
     char *ptr, buffer_write[BUFFER_SIZE], buffer_read[BUFFER_SIZE];
     struct sockaddr_in centralServer, UDPServer, TCPServer, TCPClient;
     struct hostent *host = NULL;
-    bool isDefaultServer = true, isStartServer = false, isDSServer = false, sentTokenO = false, ringAvailable = true;
+    bool isDefaultServer = true, isStartServer = false, isDSServer = false, sentTokenO = false, ringAvailable = true, leaveFlag = false, exitFlag = false;
     fd_set rfds;
     enum {idle, busy} stateClient, stateServer;
     enum {on, off} serviceState;
@@ -272,17 +272,7 @@ int main (int argc, char * argv[]) {
                         }
                         isDSServer = false;
                     }
-                    
-                    if(stateServer == busy && stateClient == busy) {
-                        memset(buffer_write, 0, BUFFER_SIZE);
-                        sprintf(buffer_write, "TOKEN %d;O;%d;%s;%d\n", serviceServerID, successorID, successorIP, successorPort);
-                        writeTCP(TCPClientSocket, buffer_write);
-                        sentTokenO = true;
-                    }
-
-                    stateServer = idle;
-                    stateClient = idle;
-                    clearSuccessors(&successorID, &successorPort, successorIP);
+     				leaveFlag = true;
                 }
             }
             else if(!strcmp("exit", message)) {
@@ -298,7 +288,6 @@ int main (int argc, char * argv[]) {
                             sprintf(buffer_write, "NEW_START\n");
                             writeTCP(TCPClientSocket, buffer_write);
                         }
-                        isStartServer = false;
                     }
                     
                     if(isDSServer) {
@@ -309,15 +298,9 @@ int main (int argc, char * argv[]) {
                             sprintf(buffer_write, "TOKEN %d;S\n", serviceServerID);
                             writeTCP(TCPClientSocket, buffer_write);
                         }
-                    }  
-                  
-                    
-                    if(stateServer == busy && stateClient == busy) {
-                        memset(buffer_write, 0, BUFFER_SIZE);
-                        sprintf(buffer_write, "TOKEN %d;O;%d;%s;%d\n", serviceServerID, successorID, successorIP, successorPort);
-                        writeTCP(TCPClientSocket, buffer_write);
                     }
-                    break;
+                    leaveFlag = true;
+                    exitFlag = true;  
                 }
             }
             else if(!strcmp("help", message)) {
@@ -543,6 +526,15 @@ int main (int argc, char * argv[]) {
 	                    }
 	                    else {
 	                        printf("\tNew DS server found\n");
+
+	                        if(leaveFlag) {
+		                        memset(buffer_write, 0, BUFFER_SIZE);
+		                        sprintf(buffer_write, "TOKEN %d;O;%d;%s;%d\n", serviceServerID, successorID, successorIP, successorPort);
+		                        writeTCP(TCPClientSocket, buffer_write);
+		                        
+		                        sentTokenO = true;
+                				clearSuccessors(&successorID, &successorPort, successorIP);
+	                        }
 	                    }
 	                }
 	                else if(tokenType == 'I') {
@@ -557,6 +549,15 @@ int main (int argc, char * argv[]) {
 	                    }
 	                    else {
 	                        printf("\tAll servers warned that the ring is unavailable\n");
+
+	                        if(leaveFlag) {
+		                        memset(buffer_write, 0, BUFFER_SIZE);
+		                        sprintf(buffer_write, "TOKEN %d;O;%d;%s;%d\n", serviceServerID, successorID, successorIP, successorPort);
+		                        writeTCP(TCPClientSocket, buffer_write);
+		                        
+		                        sentTokenO = true;
+                				clearSuccessors(&successorID, &successorPort, successorIP);
+	                        }
 	                    }
 	                }
 	                else if(tokenType == 'D') {
@@ -634,11 +635,16 @@ int main (int argc, char * argv[]) {
             else { 
                 printf("\tSocket closed at client end!\n");
                 close(afd);
-
+                
+                
                 if(sentTokenO) {
-                    stateServer = idle;
+                	stateServer = idle;
                     sentTokenO = false;
                     clearSuccessors(&successorID, &successorPort, successorIP);
+
+                    if(exitFlag) {
+                    	break;
+                    }
                 }
                 else {
                     afd = newfd;
@@ -656,7 +662,9 @@ int main (int argc, char * argv[]) {
             }
             else { 
                 printf("\tSocket closed at server end!\n");
-                stateClient = idle;
+                if(sentTokenO) {
+                	stateClient = idle;
+                }
                 close(TCPClientSocket);
             } 
         }
