@@ -53,7 +53,7 @@ int main (int argc, char * argv[]) {
         exit(-1);
     }
 
-    // Arguments stuff
+    // Argumentos de entrada
     centralServerIP[0] = '\0';
     for(i = 1; i < argc; i = i+2) {
         if(!strcmp("-n", argv[i]) && i+1 < argc) {
@@ -82,6 +82,7 @@ int main (int argc, char * argv[]) {
         }
     }
 
+    // Inicialização das sockets UDP e TCP
     centralServerSocket = socket(AF_INET, SOCK_DGRAM, 0);
     if(centralServerSocket == -1) {
         exit(-1);
@@ -96,7 +97,7 @@ int main (int argc, char * argv[]) {
         exit(-1);
     }
 
-    // UDP client for central server requests
+    // Cliente UDP para pedidos ao servidor central
     memset((void*)&centralServer,(int)'\0', sizeof(centralServer));
     centralServer.sin_family = AF_INET;
     if(isDefaultServer || centralServerIP[0] == '\0') { 
@@ -111,7 +112,7 @@ int main (int argc, char * argv[]) {
     centralServer.sin_port = htons((u_short)centralServerPort);
     centralServerLength = sizeof(centralServer);
 
-    // UDP Server for reqserv clients requests
+    // Servidor UDP para pedidos da aplicação reqserv
     memset((void*)&UDPServer,(int)'\0', sizeof(UDPServer));
     UDPServer.sin_family = AF_INET;
     UDPServer.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -121,7 +122,7 @@ int main (int argc, char * argv[]) {
         exit(-1);
     }
 
-    // TCP Server
+    // Servidor TCP para um serviço do anel
     memset((void*)&TCPServer,(int)'\0', sizeof(TCPServer));
     TCPServer.sin_family = AF_INET;
     TCPServer.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -135,7 +136,7 @@ int main (int argc, char * argv[]) {
         exit(-1);
     } 
 
-    // Central server and service information
+    // Informação do servidor central e do serviço
     if(isDefaultServer) {
         printf("-> Default central Server\n");
     } 
@@ -214,7 +215,7 @@ int main (int argc, char * argv[]) {
                             exit(-1);
                         }
 
-                        // TCP Client
+                        // Cliente TCP para um serviço do anel
                         memset((void*)&TCPClient,(int)'\0', sizeof(TCPClient));
                         TCPClient.sin_family = AF_INET;
                         inet_aton(replyIP, &TCPClient.sin_addr);
@@ -255,9 +256,11 @@ int main (int argc, char * argv[]) {
                     printf("\tCannot leave while provinding a service\n");
                 }
                 else {
+                    // Caso o serviço a remover seja servidor de arranque
                     if(isStartServer) {
                         sprintf(message,"WITHDRAW_START %d;%d", serviceX, serviceServerID);
                         communicateUDP(centralServerSocket, centralServer, message, reply);
+                        // Mensagem para procura de um novo servidor de arranque
                         if(stateServer == busy && stateClient == busy) {
                             memset(buffer_write, 0, BUFFER_SIZE);
                             sprintf(buffer_write, "NEW_START\n");
@@ -265,9 +268,13 @@ int main (int argc, char * argv[]) {
                         }
                     }
                     
+                    // Caso o serviço a remover seja servidor de despacho.
+                    // Neste caso o "Token O" é enviado na receção do "Token T" ou na receção do "Token I",
+                    // de modo a ser possivel atualizar a disponibilidade do anel após a sua saida
                     if(isDSServer) {
                         sprintf(message,"WITHDRAW_DS %d;%d", serviceX, serviceServerID);
                         communicateUDP(centralServerSocket, centralServer, message, reply);
+                        // Mensagem para procura de um novo servidor de despacho
                         if(stateServer == busy && stateClient == busy) {
                             memset(buffer_write, 0, BUFFER_SIZE);
                             sprintf(buffer_write, "TOKEN %d;S\n", serviceServerID);
@@ -275,7 +282,9 @@ int main (int argc, char * argv[]) {
                         }
                     }
 
+                    // Caso o serviço a remover nao seja servidor de despacho, ou caso seja o unico serviço no anel
                     if((isStartServer && !isDSServer) || (!isStartServer && !isDSServer) || successorID == 0) {
+                        // Mensagem para aviso de saida do anel
                         if(stateServer == busy && stateClient == busy) {
                             memset(buffer_write, 0, BUFFER_SIZE);
                             sprintf(buffer_write, "TOKEN %d;O;%d;%s;%d\n", serviceServerID, successorID, successorIP, successorPort);
@@ -301,27 +310,33 @@ int main (int argc, char * argv[]) {
                     printf("\tCannot exit while provinding a service\n");
                 }
                 else {
+                    // Caso o serviço de saida seja servidor de arranque
                     if(isStartServer) {
                         sprintf(message,"WITHDRAW_START %d;%d", serviceX, serviceServerID);
                         communicateUDP(centralServerSocket, centralServer, message, reply);
+                        // Mensagem para procura de um novo servidor de arranque
                         if(stateServer == busy && stateClient == busy) {
                             memset(buffer_write, 0, BUFFER_SIZE);
                             sprintf(buffer_write, "NEW_START\n");
                             writeTCP(TCPClientSocket, buffer_write);
                         }
                     }
-                    
+                    // Caso o serviço de saida seja servidor de despacho
+                    // Neste caso o "Token O" é enviado na receção do "Token T" ou na receção do "Token I",
+                    // de modo a ser possivel atualizar a disponibilidade do anel após a sua saida
                     if(isDSServer) {
                         sprintf(message,"WITHDRAW_DS %d;%d", serviceX, serviceServerID);
                         communicateUDP(centralServerSocket, centralServer, message, reply);
+                        // Mensagem para procura de um novo servidor de despacho
                         if(stateServer == busy && stateClient == busy) {
                             memset(buffer_write, 0, BUFFER_SIZE);
                             sprintf(buffer_write, "TOKEN %d;S\n", serviceServerID);
                             writeTCP(TCPClientSocket, buffer_write);
                         }
                     }
-
+                    // Caso o serviço de saida nao seja servidor de despacho, ou caso seja o unico serviço no anel
                     if((isStartServer && !isDSServer) || (!isStartServer && !isDSServer) || successorID == 0) {
+                        // Mensagem para aviso de saida do anel
                         if(stateServer == busy && stateClient == busy) {
                             memset(buffer_write, 0, BUFFER_SIZE);
                             sprintf(buffer_write, "TOKEN %d;O;%d;%s;%d\n", serviceServerID, successorID, successorIP, successorPort);
@@ -343,11 +358,11 @@ int main (int argc, char * argv[]) {
                 }
             }
             else if(!strcmp("help", message)) {
-            printf("Valid commands: \n");
-            printf("-> join x \n");
-            printf("-> show_state \n");
-            printf("-> leave \n");
-            printf("-> exit \n");  
+                printf("Valid commands: \n");
+                printf("-> join x \n");
+                printf("-> show_state or ss)\n");
+                printf("-> leave \n");
+                printf("-> exit \n");  
             } 
             else {
                 printf("Invalid command! Type 'help'\n");
@@ -366,6 +381,7 @@ int main (int argc, char * argv[]) {
                 sprintf(message,"WITHDRAW_DS %d;%d", serviceX, serviceServerID);
                 communicateUDP(centralServerSocket, centralServer, message, reply);
 
+                // Mensagem para procura de um novo servidor de despacho
                 if(stateClient == busy && stateServer == busy) {
                     memset(buffer_write, 0, BUFFER_SIZE);
                     sprintf(buffer_write, "TOKEN %d;S\n", serviceServerID);
@@ -381,6 +397,7 @@ int main (int argc, char * argv[]) {
             else if(!strcmp("MY SERVICE OFF", reply)) {
                 sprintf(buffer, "YOUR SERVICE OFF");
 
+                // Caso o anel esteja indisponivel, alertar os restantes serviçoes que este passou a disponivel 
                 if(!ringAvailable) {
                     memset(buffer_write, 0, BUFFER_SIZE);
                     sprintf(buffer_write, "TOKEN %d;D\n", serviceServerID);
@@ -394,15 +411,18 @@ int main (int argc, char * argv[]) {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         else if(FD_ISSET(TCPServerSocket, &rfds)) {
             TCPServerLength = sizeof(TCPServer);
+            // socket temporaria para rearranjo do anel, posteriormente será usada a 'afd'
             if((newfd = accept(TCPServerSocket, (struct sockaddr*)&TCPServer, &TCPServerLength)) == -1) {
                 exit(1);
             } 
             switch(stateServer)
                 {
+                // Primeiro caso, onde ainda nao existe anel
                 case idle: 
                     afd = newfd;
                     stateServer = busy; 
                     break;
+                // Segundo caso, onde o anel ja foi criado
                 case busy: 
                     memset(buffer_read, 0, BUFFER_SIZE);
                     if((bytes = read(newfd, buffer_read, BUFFER_SIZE)) != 0) {
@@ -411,11 +431,15 @@ int main (int argc, char * argv[]) {
                         }
                         printf("\t-> Received: %s", buffer_read);
 
+                        // Caso o servidor de despacho receba NEW, circular o token N pelo anel
+                        // para se realizar o rearranjo 
                         if(sscanf(buffer_read, "NEW %d;%[^;];%d\n", &replyID1, replyIP, &replyPort) == 3) {
                             memset(buffer_write, 0, BUFFER_SIZE);
                             sprintf(buffer_write, "TOKEN %d;N;%d;%s;%d\n", serviceServerID, replyID1, replyIP, replyPort);
                             writeTCP(TCPClientSocket, buffer_write);                        
 
+                            // Caso o anel esteja indesponivel e na entrada de um novo serviço passar
+                            // o anel para disponivel, e procurar um novo servidor de despacho
                             if(!ringAvailable) {
                                 memset(buffer_write, 0, BUFFER_SIZE);
                                 sprintf(buffer_write, "TOKEN %d;S\n", serviceServerID);
@@ -441,6 +465,7 @@ int main (int argc, char * argv[]) {
                     exit(1);
                 }
                
+                // Ponteiro para o inicio do buffer de leitura
                 pointerPosition = &buffer_read[0];
                 endLines = countEndLines(buffer_read, endLines);
                 if(endLines == 0) {
@@ -448,10 +473,12 @@ int main (int argc, char * argv[]) {
                 	exit(-1);
                 }
 
+                // Ciclo executado consoante o número de mensagens protocolares contidas no buffer de leitura
                 while(endLines > 0) {
 	                pointerPosition = divideBuffer(pointerPosition, divBuffer);
 					printf("\t-> Received: %s", divBuffer);
 
+                    // Caso a mensagem seja do tipo Token
 	                if(strstr(divBuffer, "TOKEN ") != NULL) {
 	                    tokenType = checkToken(divBuffer);
 	                }
@@ -459,7 +486,7 @@ int main (int argc, char * argv[]) {
 	                	tokenType = ' ';
 	                }
 
-	                
+	                // Caso em que ainda nao existe anel e procede-se à sua criação
 	                if(sscanf(divBuffer, "NEW %d;%[^;];%d\n", &replyID1, replyIP, &replyPort) == 3) {
 	                    TCPClientSocket = socket(AF_INET, SOCK_STREAM, 0);
 	                    if(TCPClientSocket == -1) {
@@ -486,6 +513,7 @@ int main (int argc, char * argv[]) {
 	                        writeTCP(TCPClientSocket, buffer_write);
 	                    }
 	                }
+                    // Registo de um novo servidor de arranque
 	                else if(!strcmp("NEW_START\n", divBuffer)) {
 	                    sprintf(message,"SET_START %d;%d;%s;%d", serviceX, serviceServerID, serviceServerIP, serviceTcpPort);
 	                    communicateUDP(centralServerSocket, centralServer, message, reply);
@@ -496,7 +524,7 @@ int main (int argc, char * argv[]) {
 	                        printf("\tInvalid type of received message\n");
 	                        exit(-1);
 	                    }
-
+                        // Quando encontrado o antecessor do servidor de arranque liga-lo ao novo serviço a ser introduzido no anel
 	                    if(replyID1 == successorID) {
 	                        close(TCPClientSocket);
 	                        
@@ -517,7 +545,8 @@ int main (int argc, char * argv[]) {
 	                        successorID = replyID2;
 	                        successorPort =  replyPort;
 	                        sprintf(successorIP, "%s", replyIP);
-	                    } 
+	                    }
+                        // Caso contrário circular o token 
 	                    else {
 	                        writeTCP(TCPClientSocket, divBuffer);
 	                    }
@@ -527,7 +556,7 @@ int main (int argc, char * argv[]) {
 	                        printf("\tInvalid type of received message\n");
 	                        exit(-1);
 	                    }
-
+                        // Caso seja encontrado um novo possivel servidor de despacho
 	                    if(serviceServerID != replyID1) {
 	                        if(serviceState == off) {
 	                            sprintf(message,"SET_DS %d;%d;%s;%d",  serviceX, serviceServerID, serviceServerIP, serviceUdpPort);
@@ -539,10 +568,12 @@ int main (int argc, char * argv[]) {
 
 	                            isDSServer = true;
 	                        }
+                            // Caso contrário circular o token
 	                        else {
 	                            writeTCP(TCPClientSocket, divBuffer);
 	                        }
 	                    }
+                        // Caso o token S retorne ao serviço que o enviou, informar o anel que este se encontra disponivel
 	                    else {
 	                        printf("\tRing not available\n");
 	                        memset(buffer_write, 0, BUFFER_SIZE);
@@ -552,6 +583,7 @@ int main (int argc, char * argv[]) {
 	                        ringAvailable = false;
 	                    }
 	                }
+                    // Confirmação do encontro de um servidor de despacho
 	                else if(tokenType == 'T') {
 	                    ringAvailable = true;
 	                    if(sscanf(divBuffer, "TOKEN %d;T\n", &replyID1) != 1) {
@@ -580,6 +612,7 @@ int main (int argc, char * argv[]) {
 	                        }
 	                    }
 	                }
+                    // Aviso de anel indisponivel
 	                else if(tokenType == 'I') {
 	                    if(sscanf(divBuffer, "TOKEN %d;I\n", &replyID1) != 1) {
 	                        printf("\tInvalid type of received message\n");
@@ -609,6 +642,7 @@ int main (int argc, char * argv[]) {
 	                        }
 	                    }
 	                }
+                    // Aviso de disponibilade do anel após situação de indisponibilidade
 	                else if(tokenType == 'D') {
 	                    ringAvailable = true;
 	                    if(sscanf(divBuffer, "TOKEN %d;D\n", &replyID1) != 1) {
@@ -630,13 +664,15 @@ int main (int argc, char * argv[]) {
 	                        }
 	                    }
 	                }
+                    // Aviso de saida do anel
 	                else if(tokenType == 'O') {
 	                    if(sscanf(divBuffer, "TOKEN %d;O;%d;%[^;];%d\n", &replyID1, &replyID2, replyIP, &replyPort) != 4) {
 	                        printf("\tInvalid type of received message\n");
 	                        exit(-1);
 	                    }
-
-	                    if(replyID1 == successorID && replyID2 == serviceServerID) {\
+                        
+                        // Caso o anel seja constituido apenas por dois serviços
+	                    if(replyID1 == successorID && replyID2 == serviceServerID) {
 	                        close(afd);
 	                        close(TCPClientSocket);
 
@@ -644,12 +680,21 @@ int main (int argc, char * argv[]) {
 	                        stateClient = idle;
 	                        clearSuccessors(&successorID, &successorPort, successorIP);
 	                    } 
+                        // Caso tenha mais que dois serviços
+                            // O serviço seguinte ao que tenciona sair 
+                            // quebra a sua "ligação servidor" com ele  
+                            // e circular o token
 	                    else if(replyID2 == serviceServerID) {
 	                        close(afd);
 
 	                        stateServer = idle;
 	                        writeTCP(TCPClientSocket, divBuffer);
 	                    }
+                        // Caso tenha mais que dois serviços
+                            // O serviço anterior ao que tenciona sair
+                            // quebra a sua "ligação cliente" com ele
+                            // e liga-se ao sucessor do que tenciona sair
+                            // restabelecendo assim o anel
 	                    else if(replyID1 == successorID) {
 	                        close(TCPClientSocket);
 	                        
@@ -671,6 +716,7 @@ int main (int argc, char * argv[]) {
 	                        successorPort =  replyPort;
 	                        sprintf(successorIP, "%s", replyIP); 
 	                    }
+                        // Caso nao seja o serviço seguinte nem o anterior ao serviço que tenciona sair, circula o token
 	                    else {
 	                    	writeTCP(TCPClientSocket, divBuffer);
 	                    }
@@ -718,6 +764,7 @@ int main (int argc, char * argv[]) {
     return 0; 
 }
 
+// Função de envio e receção de mensagens do tipo UDP ( para cada pedido existe sempre uma resposta)
 void communicateUDP(int fd, struct sockaddr_in addr, char *message, char *reply) {
     int bytes, counter;
     fd_set rfds;
@@ -730,6 +777,7 @@ void communicateUDP(int fd, struct sockaddr_in addr, char *message, char *reply)
         exit(-1);
     }
 
+    // Timeouts
     tv.tv_sec = 5;
     tv.tv_usec = 0;
     FD_ZERO(&rfds);
@@ -754,19 +802,24 @@ void communicateUDP(int fd, struct sockaddr_in addr, char *message, char *reply)
     return;
 }
 
+// Função para analisar a respostas do servidor central
 int checkServerReply(char *reply, int *id1, int *id2, char *ip, unsigned *port) {
     sscanf(reply, "OK %d;%d;%[^;];%d", id1, id2, ip, port);
+    // Resposta de erro (id < 0) ou de nao existencia do serviço (id = 0) 
     if(*id1 <= 0) {
         return 0;
     } 
+    // Resposta do tipo OK x;0;0.0.0.0.;0
     else if(*id1 != 0 && *id2 == 0 && (!strcmp(ip, "0.0.0.0")) && *port == 0) {
         return 1;
     } 
+    // reposta do tipo OK x;y;z;w
     else {
         return 2;
     }
 }
 
+// Função de envio dinamico de dados
 void writeTCP(int socket, char *message) {
     int bytes, bytesLeft, bytesWritten;
     char *ptr;
@@ -785,12 +838,14 @@ void writeTCP(int socket, char *message) {
     }
 }
 
+// Função para limpar a informação do sucessor
 void clearSuccessors(int *id, unsigned *port, char *ip) {
     *id = 0;
     *port = 0;
     ip[0] = '\0';
 }
 
+// Função para analisar o tipo do Token (S,T,O,...)
 char checkToken(char *message) {
     char type;
     int i = 6;
@@ -803,6 +858,7 @@ char checkToken(char *message) {
     return type;
 }
 
+// Função para converter formato enum em string
 char* checkServiceState(int state) {
     if(state == 0) {
         return "On";
@@ -811,6 +867,7 @@ char* checkServiceState(int state) {
     }
 }
 
+// Função para converter formato bool em string
 char* checkRingState(bool availability) {
     if(availability) {
         return "Available";
@@ -819,6 +876,9 @@ char* checkRingState(bool availability) {
     }
 }
 
+// Função para contar o número de '\n' numa mensagem recebida.
+// Tendo em conta que este é o delimitador de uma mensagem TCP
+// por cada '\n' corresponde uma mensagem a analisar
 int countEndLines(char *buffer, int endLines) {
     int i;
    
@@ -832,6 +892,8 @@ int countEndLines(char *buffer, int endLines) {
     return endLines;
 }
 
+// Função para dividir uma mensagem com multiplos '\n' em
+// sub-mensagens de modo a serem avaliadas individualmente 
 char* divideBuffer(char *pointerPosition, char *divBuffer) {
     int i = 0;
     int endLines = 0;

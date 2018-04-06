@@ -38,7 +38,7 @@ int main (int argc, char * argv[]) {
         exit(-1);
     }
 
-    // Arguments stuff
+    // Argumentos de entrada
     centralServerIP[0] = '\0';
     for(i = 1; i < argc; i = i+2) {
         if(!strcmp("-i", argv[i]) && i+1 < argc) {
@@ -53,6 +53,7 @@ int main (int argc, char * argv[]) {
         }
     }
 
+    // Inicialização das sockets UDP
     centralServerSocket = socket(AF_INET, SOCK_DGRAM, 0);
     if(centralServerSocket == -1) {
         exit(-1);
@@ -62,7 +63,7 @@ int main (int argc, char * argv[]) {
         exit(-1);
     }
 
-    // UDP client for central server requests
+    // Cliente UDP para pedidos ao servidor central
     memset((void*)&centralServer,(int)'\0', sizeof(centralServer));
     centralServer.sin_family = AF_INET;
     if(isDefaultServer || centralServerIP[0] == '\0') { 
@@ -76,7 +77,7 @@ int main (int argc, char * argv[]) {
     centralServer.sin_port = htons((u_short)centralServerPort);
     centralServerLength = sizeof(centralServer);
 
-    // Central server and service information
+    //Informação do servidor central
     if(isDefaultServer) {
         printf("-> Default central Server\n");
     } else {
@@ -111,6 +112,7 @@ int main (int argc, char * argv[]) {
                                     printf("\tNo DS Server!\n");
                                     break;
                                 case 1:
+                                    // Cliente UDP para comunicar com o serviço
                                     memset((void*)&DS_Server,(int)'\0', sizeof(DS_Server));
                                     DS_Server.sin_family = AF_INET;
                                     inet_aton(ip_DS, &DS_Server.sin_addr);
@@ -172,6 +174,7 @@ int main (int argc, char * argv[]) {
     return 0; 
 }
 
+// Função de envio e receção de mensagens do tipo UDP ( para cada pedido existe sempre uma resposta)
 int communicateUDP(int fd, struct sockaddr_in addr, char *message, char *reply) {
     int bytes, counter;
     fd_set rfds;
@@ -183,6 +186,7 @@ int communicateUDP(int fd, struct sockaddr_in addr, char *message, char *reply) 
         exit(-1);
     }
 
+    // Timeouts 
     tv.tv_sec = 5;
     tv.tv_usec = 0;
 
@@ -209,11 +213,14 @@ int communicateUDP(int fd, struct sockaddr_in addr, char *message, char *reply) 
 
 }
 
+// Função para analisar a respostas do servidor central
 int checkServerReply(char *reply, int *id, char *ip, unsigned *port) {
     sscanf(reply, "OK %d;%[^;];%d", id, ip, port);
+    // Resposta de erro (id < 0) ou de nao existencia do serviço (id = 0) 
     if(*id <= 0) {
         return 0;
     } 
+    // Resposta com informação sobre um serviço (id > 0)
     else {
         return 1;
     } 
