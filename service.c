@@ -37,7 +37,8 @@ int main (int argc, char * argv[]) {
     char *ptr, buffer_write[BUFFER_SIZE], buffer_read[BUFFER_SIZE];
     struct sockaddr_in centralServer, UDPServer, TCPServer, TCPClient;
     struct hostent *host = NULL;
-    bool isDefaultServer = true, isStartServer = false, isDSServer = false, sentTokenO = false, ringAvailable = true, leaveFlag = false, exitFlag = false;
+    bool isDefaultServer = true, isStartServer = false, isDSServer = false, ringAvailable = true, leaveFlag = false, exitFlag = false, 
+        exitStep1 = false, exitStep2 = false;
     fd_set rfds;
     enum {idle, busy} stateClient, stateServer;
     enum {on, off} serviceState;
@@ -154,12 +155,12 @@ int main (int argc, char * argv[]) {
     serviceState = off;
     clearSuccessors(&successorID, &successorPort, successorIP);
 
-    while(1) {
+    while(!exitStep2) {
         FD_ZERO(&rfds);
 		FD_SET(fileno(stdin), &rfds);
         FD_SET(UDPServerSocket, &rfds); maxfd = max(fileno(stdin), UDPServerSocket);
         FD_SET(TCPServerSocket, &rfds); maxfd = max(maxfd, TCPServerSocket); 
-        if(stateServer == busy) {
+        if(stateServer == busy || exitStep1) {
             FD_SET(afd, &rfds); 
             maxfd = max(maxfd,afd);
         }
@@ -175,6 +176,7 @@ int main (int argc, char * argv[]) {
     
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         if(FD_ISSET(fileno(stdin), &rfds)) {
+            memset(message, 0, BUFFER_SIZE);
             fgets(buffer, sizeof(buffer), stdin);
             sscanf(buffer,"%[^\n]s", message);
             
@@ -196,6 +198,7 @@ int main (int argc, char * argv[]) {
                         communicateUDP(centralServerSocket, centralServer, message, reply);
                         isDSServer = true;
                         isStartServer = true;
+                        leaveFlag = false;
                        
                         break;
 
@@ -229,6 +232,7 @@ int main (int argc, char * argv[]) {
                         successorPort =  replyPort;
                         sprintf(successorIP, "%s", replyIP);
                         stateClient = busy;    
+                        leaveFlag = false;
                                     
                         break;
                     
@@ -246,7 +250,7 @@ int main (int argc, char * argv[]) {
                     printf("\tSucessor ID      : %d\n", successorID);
                 }
             }
-            else if(!strcmp("leave", message) && serviceState == off) {
+            else if(!strcmp("leave", message)) {
                 if(serviceState == on) {
                     printf("\tCannot leave while provinding a service\n");
                 }
@@ -259,7 +263,6 @@ int main (int argc, char * argv[]) {
                             sprintf(buffer_write, "NEW_START\n");
                             writeTCP(TCPClientSocket, buffer_write);
                         }
-                        isStartServer = false;
                     }
                     
                     if(isDSServer) {
@@ -270,8 +273,26 @@ int main (int argc, char * argv[]) {
                             sprintf(buffer_write, "TOKEN %d;S\n", serviceServerID);
                             writeTCP(TCPClientSocket, buffer_write);
                         }
-                        isDSServer = false;
                     }
+
+                    if((isStartServer && !isDSServer) || (!isStartServer && !isDSServer) || successorID == 0) {
+                        if(stateServer == busy && stateClient == busy) {
+                            memset(buffer_write, 0, BUFFER_SIZE);
+                            sprintf(buffer_write, "TOKEN %d;O;%d;%s;%d\n", serviceServerID, successorID, successorIP, successorPort);
+                            writeTCP(TCPClientSocket, buffer_write);
+                            stateServer = idle;
+	                        stateClient = idle;
+
+                            clearSuccessors(&successorID, &successorPort, successorIP);
+                        }
+                        else {
+                            printf("\tNot connected\n");
+                        }
+                    }
+
+
+                    isStartServer = false;
+                    isDSServer = false;
      				leaveFlag = true;
                 }
             }
@@ -299,6 +320,24 @@ int main (int argc, char * argv[]) {
                             writeTCP(TCPClientSocket, buffer_write);
                         }
                     }
+
+                    if((isStartServer && !isDSServer) || (!isStartServer && !isDSServer) || successorID == 0) {
+                        if(stateServer == busy && stateClient == busy) {
+                            memset(buffer_write, 0, BUFFER_SIZE);
+                            sprintf(buffer_write, "TOKEN %d;O;%d;%s;%d\n", serviceServerID, successorID, successorIP, successorPort);
+                            writeTCP(TCPClientSocket, buffer_write);
+                            stateServer = idle;
+	                        stateClient = idle;
+                            clearSuccessors(&successorID, &successorPort, successorIP);
+                            exitStep1 = true;
+                        }
+                        else {
+                            break;
+                        }
+                    }
+
+                    isStartServer = false;
+                    isDSServer = false;
                     leaveFlag = true;
                     exitFlag = true;  
                 }
@@ -395,7 +434,7 @@ int main (int argc, char * argv[]) {
                 }
         }
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-        else if(stateServer == busy && FD_ISSET(afd, &rfds)) {
+        else if((stateServer == busy && FD_ISSET(afd, &rfds)) || (exitStep1 == true && FD_ISSET(afd, &rfds))) {
             memset(buffer_read, 0, BUFFER_SIZE);
             if((bytes = read(afd, buffer_read, BUFFER_SIZE)) != 0) {
                 if(bytes == -1) {
@@ -461,7 +500,6 @@ int main (int argc, char * argv[]) {
 	                    if(replyID1 == successorID) {
 	                        close(TCPClientSocket);
 	                        
-	                        // meter em função
 	                        TCPClientSocket = socket(AF_INET, SOCK_STREAM, 0);
 	                        if(TCPClientSocket == -1) {
 	                            exit(-1);
@@ -531,9 +569,14 @@ int main (int argc, char * argv[]) {
 		                        memset(buffer_write, 0, BUFFER_SIZE);
 		                        sprintf(buffer_write, "TOKEN %d;O;%d;%s;%d\n", serviceServerID, successorID, successorIP, successorPort);
 		                        writeTCP(TCPClientSocket, buffer_write);
-		                        
-		                        sentTokenO = true;
                 				clearSuccessors(&successorID, &successorPort, successorIP);
+
+                                stateServer = idle;
+	                            stateClient = idle;
+
+                                if(exitFlag) {
+                                    exitStep1 = true;
+                                }
 	                        }
 	                    }
 	                }
@@ -554,9 +597,15 @@ int main (int argc, char * argv[]) {
 		                        memset(buffer_write, 0, BUFFER_SIZE);
 		                        sprintf(buffer_write, "TOKEN %d;O;%d;%s;%d\n", serviceServerID, successorID, successorIP, successorPort);
 		                        writeTCP(TCPClientSocket, buffer_write);
-		                        
-		                        sentTokenO = true;
+
+                                stateServer = idle;
+	                            stateClient = idle;
+		                    
                 				clearSuccessors(&successorID, &successorPort, successorIP);
+
+                                if(exitFlag) {
+                                    exitStep1 = true;
+                                }
 	                        }
 	                    }
 	                }
@@ -587,22 +636,23 @@ int main (int argc, char * argv[]) {
 	                        exit(-1);
 	                    }
 
-	                    if(replyID1 == successorID && replyID2 == serviceServerID) {
+	                    if(replyID1 == successorID && replyID2 == serviceServerID) {\
 	                        close(afd);
 	                        close(TCPClientSocket);
+
 	                        stateServer = idle;
 	                        stateClient = idle;
 	                        clearSuccessors(&successorID, &successorPort, successorIP);
 	                    } 
 	                    else if(replyID2 == serviceServerID) {
 	                        close(afd);
+
 	                        stateServer = idle;
 	                        writeTCP(TCPClientSocket, divBuffer);
 	                    }
 	                    else if(replyID1 == successorID) {
 	                        close(TCPClientSocket);
 	                        
-	                        // meter em função
 	                        TCPClientSocket = socket(AF_INET, SOCK_STREAM, 0);
 	                        if(TCPClientSocket == -1) {
 	                            exit(-1);
@@ -632,23 +682,14 @@ int main (int argc, char * argv[]) {
 	            	endLines--;
 	           	}
 	        }
-            else { 
+            else {     
+                if(exitStep1) {
+                    exitStep2 = true;
+                    break;
+                }
                 printf("\tSocket closed at client end!\n");
                 close(afd);
-                
-                
-                if(sentTokenO) {
-                	stateServer = idle;
-                    sentTokenO = false;
-                    clearSuccessors(&successorID, &successorPort, successorIP);
-
-                    if(exitFlag) {
-                    	break;
-                    }
-                }
-                else {
-                    afd = newfd;
-                }
+                afd = newfd;
             }  
         }
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////    
@@ -660,12 +701,9 @@ int main (int argc, char * argv[]) {
                 }
                printf("\t->Received: %s", buffer_read);
             }
-            else { 
+            else {
+                close(TCPClientSocket); 
                 printf("\tSocket closed at server end!\n");
-                if(sentTokenO) {
-                	stateClient = idle;
-                }
-                close(TCPClientSocket);
             } 
         }
     }
